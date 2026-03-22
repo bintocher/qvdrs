@@ -1,0 +1,32 @@
+[package]
+name = "qvd"
+version = "0.1.0"
+edition = "2021"
+description = "A zero-dependency library for reading and writing Qlik QVD files"
+license = "MIT"
+
+[lib]
+name = "qvd"
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
+
+[dev-dependencies]
+md5 = "0.7"
+
+[[example]]
+name = "read_qvd"
+path = "examples/read_qvd.rs"
+
+[[example]]
+name = "roundtrip"
+path = "examples/roundtrip.rs"
+
+[[example]]
+name = "roundtrip_all"
+path = "examples/roundtrip_all.rs"

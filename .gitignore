@@ -1,0 +1,8 @@
+/target/
+/qvd_input/
+/qvd_output/
+*.pyd
+*.so
+*.dll
+__pycache__/
+*.egg-info/
