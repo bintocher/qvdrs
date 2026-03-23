@@ -254,6 +254,10 @@ git push origin v0.1.0
 
 Then create a GitHub Release from the tag — both crates.io and PyPI workflows will trigger automatically.
 
+## Author
+
+Stanislav Chernov ([@bintocher](https://github.com/bintocher))
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)

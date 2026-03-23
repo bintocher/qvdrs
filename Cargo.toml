@@ -10,7 +10,7 @@ documentation = "https://docs.rs/qvd"
 readme = "README.md"
 keywords = ["qvd", "qlik", "parquet", "arrow", "etl"]
 categories = ["parser-implementations", "encoding", "command-line-utilities"]
-authors = ["bintocher"]
+authors = ["Stanislav Chernov <bintocher>"]
 exclude = ["qvd_input/", "qvd_output/", "*.qvd", "*.parquet"]
 
 [lib]
