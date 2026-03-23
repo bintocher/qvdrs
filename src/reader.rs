@@ -6,7 +6,11 @@ use crate::index::read_all_row_indices;
 use crate::symbol::read_symbols;
 use crate::value::{QvdSymbol, QvdValue};
 
-/// A fully parsed QVD file.
+/// A fully parsed QVD file containing metadata, symbol tables, and row indices.
+///
+/// Use [`read_qvd_file`] to load from disk, then access data via [`get`](QvdTable::get),
+/// [`column_strings`](QvdTable::column_strings), or convert to Arrow with
+/// [`qvd_to_record_batch`](crate::parquet::qvd_to_record_batch) (feature `parquet_support`).
 #[derive(Debug)]
 pub struct QvdTable {
     pub header: QvdTableHeader,
@@ -59,7 +63,7 @@ impl QvdTable {
     }
 }
 
-/// Read and parse a QVD file from a reader.
+/// Read and parse a QVD file from any `Read + Seek + BufRead` source.
 pub fn read_qvd<R: Read + Seek + BufRead>(mut reader: R) -> QvdResult<QvdTable> {
     // 1. Read XML header (everything up to the null byte)
     let mut xml_bytes = Vec::new();
@@ -116,7 +120,7 @@ pub fn read_qvd<R: Read + Seek + BufRead>(mut reader: R) -> QvdResult<QvdTable> 
     })
 }
 
-/// Read a QVD file from a file path.
+/// Read a QVD file from a file path. This is the main entry point for reading QVD files.
 pub fn read_qvd_file(path: &str) -> QvdResult<QvdTable> {
     let file = std::fs::File::open(path)?;
     let reader = std::io::BufReader::new(file);

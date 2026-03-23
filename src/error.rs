@@ -1,5 +1,6 @@
 use std::fmt;
 
+/// Errors that can occur when reading, writing, or converting QVD files.
 #[derive(Debug)]
 pub enum QvdError {
     Io(std::io::Error),
@@ -33,4 +34,5 @@ impl From<std::string::FromUtf8Error> for QvdError {
     fn from(e: std::string::FromUtf8Error) -> Self { QvdError::Utf8(e) }
 }
 
+/// Result type alias for QVD operations.
 pub type QvdResult<T> = Result<T, QvdError>;
