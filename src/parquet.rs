@@ -100,7 +100,7 @@ pub fn read_parquet_to_qvd(path: &str) -> QvdResult<QvdTable> {
     }
 
     let total_bits = bit_offset;
-    let record_byte_size = if total_bits == 0 { 0 } else { (total_bits + 7) / 8 };
+    let record_byte_size = if total_bits == 0 { 0 } else { total_bits.div_ceil(8) };
 
     let header = QvdTableHeader {
         qv_build_no: "0".to_string(),
@@ -986,7 +986,7 @@ pub fn record_batch_to_qvd(batch: &RecordBatch, table_name: &str) -> QvdResult<Q
     }
 
     let total_bits = bit_offset;
-    let record_byte_size = if total_bits == 0 { 0 } else { (total_bits + 7) / 8 };
+    let record_byte_size = if total_bits == 0 { 0 } else { total_bits.div_ceil(8) };
 
     let header = QvdTableHeader {
         qv_build_no: "0".to_string(),

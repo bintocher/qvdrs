@@ -182,7 +182,7 @@ impl QvdTableBuilder {
         }
 
         let total_bits = bit_offset;
-        let record_byte_size = (total_bits + 7) / 8;
+        let record_byte_size = total_bits.div_ceil(8);
 
         let header = QvdTableHeader {
             qv_build_no: "0".to_string(),

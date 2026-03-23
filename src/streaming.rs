@@ -138,6 +138,7 @@ impl<R: Read + Seek + BufRead> QvdStreamReader<R> {
 
     /// Read the next chunk as column indices (without resolving symbols).
     /// More efficient if you plan to do your own symbol resolution.
+    #[allow(clippy::type_complexity)]
     pub fn next_chunk_indices(&mut self, chunk_size: usize) -> QvdResult<Option<(Vec<Vec<i64>>, usize, usize)>> {
         if self.current_row >= self.header.no_of_records {
             return Ok(None);
