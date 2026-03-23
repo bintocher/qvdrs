@@ -1,12 +1,40 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "qvd"
+name = "qvd-rs"
 version = "0.1.0"
-description = "Fast QVD file reader/writer with EXISTS() support, powered by Rust"
-requires-python = ">=3.8"
+description = "High-performance Qlik QVD file reader/writer with Parquet conversion — Rust-powered Python bindings"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "bintocher"}]
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Database",
+]
+keywords = ["qvd", "qlik", "parquet", "arrow", "etl", "data-engineering"]
+
+[project.urls]
+Homepage = "https://github.com/bintocher/qvdrs"
+Repository = "https://github.com/bintocher/qvdrs"
+Documentation = "https://github.com/bintocher/qvdrs#readme"
+Issues = "https://github.com/bintocher/qvdrs/issues"
 
 [tool.maturin]
 features = ["python"]
+module-name = "qvd"

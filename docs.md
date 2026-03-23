@@ -298,43 +298,430 @@ actual_index = raw_index + Bias
 
 ---
 
-## 7. Архитектура нашей библиотеки `rustqvd`
+## 7. Режимы загрузки QVD в Qlik
 
-### Возможности
+### Optimized Load (до 100x быстрее)
+
+Qlik поддерживает два режима чтения QVD:
+
+- **Optimized** — данные загружаются как есть, без распаковки строк. До 100x быстрее.
+- **Standard** — данные распаковываются и обрабатываются построчно.
+
+**Optimized load работает ТОЛЬКО когда:**
+- Загружаются все поля (или только переименовываются)
+- Нет WHERE-условий (кроме простого `WHERE EXISTS`)
+- Нет вычислимых полей (ApplyMap, конкатенации и т.д.)
+- Нет трансформаций в том же LOAD-выражении
+
+**Что ломает optimized load:**
+- `WHERE` с любым условием кроме `EXISTS`
+- `ApplyMap()` в LOAD
+- Вычислимые поля (`field1 & '-' & field2`)
+- Любые агрегации в том же LOAD
+
+**Workaround в Qlik:** двухшаговая загрузка — сначала optimized LOAD в resident, потом LOAD из resident с трансформациями.
+
+**Workaround с rustqvd:** выполнить трансформации ВНЕ Qlik (JOIN, WHERE, ApplyMap), сохранить результат в QVD, и Qlik сделает optimized load готового файла.
+
+### Производительность на реальных данных
+
+| Режим | 22 млн строк |
+|-------|-------------|
+| Optimized | ~3 сек |
+| Standard | ~9 сек |
+| С ApplyMap | ~15 сек |
+
+---
+
+## 8. Архитектура библиотеки `rustqvd`
+
+### Текущие возможности (v0.1.0)
+
 - Чтение QVD файлов (парсинг XML + бинарной части)
-- Запись QVD файлов (генерация XML + бинарной части)
-- Быстрый `exists()` через HashSet lookup
+- Запись QVD файлов (byte-identical roundtrip)
+- Генерация QVD с нуля через `QvdTableBuilder`
+- Быстрый `exists()` через HashSet lookup (O(1))
+- Оптимизированная `filter_rows_by_exists_fast()` — фильтрация на уровне символов
 - Python-биндинги через PyO3/maturin
 
-### Зависимости Rust
-- `quick-xml` + `serde` — парсинг/генерация XML
-- `pyo3` — Python биндинги
-- `maturin` — сборка Python-пакета
+### Зависимости
+
+- **Нулевые зависимости** для core-библиотеки
+- `pyo3` — опционально, только для Python-биндингов (feature `python`)
+- XML парсер написан с нуля внутри библиотеки
 
 ### Модули
+
 ```
 src/
-├── lib.rs          — публичный API библиотеки
-├── header.rs       — парсинг/генерация XML заголовка
-├── symbol.rs       — чтение/запись symbol tables
+├── lib.rs          — публичный API, re-exports
+├── error.rs        — типы ошибок (QvdError, QvdResult)
+├── header.rs       — парсинг/генерация XML заголовка (свой XML парсер)
+├── value.rs        — типы данных QVD (QvdSymbol, QvdValue)
+├── symbol.rs       — чтение/запись symbol tables (бинарный формат)
 ├── index.rs        — чтение/запись index table (bit-stuffing)
-├── value.rs        — типы данных QVD (QvdValue)
-├── reader.rs       — высокоуровневый reader
-├── writer.rs       — высокоуровневый writer
-├── exists.rs       — реализация exists() с HashSet
-├── error.rs        — типы ошибок
-└── python.rs       — PyO3 биндинги
+├── reader.rs       — высокоуровневый reader (QvdTable, read_qvd_file)
+├── writer.rs       — высокоуровневый writer + QvdTableBuilder
+├── exists.rs       — ExistsIndex с HashSet + filter_rows_by_exists_fast
+└── python.rs       — PyO3 биндинги (QvdTable, ExistsIndex, filter_exists)
 ```
+
+### Производительность
+
+Протестировано на 20 реальных QVD файлах (от 11 КБ до 2.8 ГБ):
+
+| Файл | Размер | Строки | Чтение | Запись |
+|------|--------|--------|--------|-------|
+| test_qvd.qvd | 11 KB | 12 | 0.0s | 0.0s |
+| AAPL.qvd | 418 KB | 2,746 | 0.0s | 0.0s |
+| kpi_clients_snapshot.qvd | 41 MB | 465,810 | 0.5s | 0.0s |
+| client_attribution.qvd | 587 MB | 5,458,618 | 6.1s | 0.4s |
+| client_action_calendar.qvd | 1.7 GB | 87,617,047 | 36.8s | 1.6s |
+| sportcatalogue.qvd | 2.8 GB | 11,907,648 | 24.3s | 2.4s |
+
+**Все 20 файлов — byte-identical roundtrip (MD5 match).**
+
+### Бенчмарк: rustqvd vs PyQvd (Pure Python, v2.3.1)
+
+| Файл | Размер | Строки | PyQvd | rustqvd | Ускорение |
+|------|--------|--------|-------|---------|-----------|
+| test_qvd.qvd | 11 KB | 12 | 0.016s | 0.000s | **33x** |
+| AAPL.qvd | 418 KB | 2,746 | 0.047s | 0.002s | **22x** |
+| bo_grouped.qvd | 3.3 MB | 81,343 | 0.449s | 0.014s | **32x** |
+| mobile_cost_cpm.qvd | 10 MB | 248,311 | 1.9s | 0.1s | **33x** |
+| client_metrics.qvd | 10 MB | 1,423,886 | 4.983s | 0.171s | **29x** |
+| kpi_snapshot.qvd | 41 MB | 465,810 | 8.5s | 0.5s | **16x** |
+| segmentation_lifecycle.qvd | 480 MB | 11,994,296 | 79.4s | 2.3s | **35x** |
+| client_attribution.qvd | 560 MB | 5,458,618 | 126.6s | 6.3s | **20x** |
+| client_action_calendar.qvd | 1.7 GB | 87,617,047 | >10 мин (не завершился) | 29.6s | **>20x** |
+| sportcatalogue.qvd | 2.8 GB | 11,907,648 | не тестировалось | 24.3s | — |
+
+**rustqvd в 16-35 раз быстрее PyQvd.** На файлах >500 МБ PyQvd работает минутами, а на 1.7 ГБ (87M строк) не завершился за 10 минут. rustqvd читает тот же файл за 30 секунд.
+
+### Python API
+
+```python
+import qvd
+
+# Чтение
+table = qvd.read_qvd("file.qvd")
+table.columns          # имена колонок
+table.num_rows         # количество строк
+table.head(5)          # первые 5 строк как list[dict]
+table.symbols("col")   # уникальные значения колонки
+table.to_dict()        # весь файл как dict {col: [values]}
+table.save("out.qvd")  # сохранение (byte-identical roundtrip)
+
+# EXISTS — O(1) lookup
+idx = qvd.ExistsIndex(table, "ClientID")
+idx.exists("12345")      # True/False
+"12345" in idx            # поддержка оператора in
+
+# Фильтрация строк по EXISTS
+rows = qvd.filter_exists(other_table, "ClientID", idx)
+```
+
+---
+
+## 9. Конкурентный анализ
+
+### Библиотеки для работы с QVD
+
+| Библиотека | Язык | Backend | Чтение | Запись | Скорость | На crates.io |
+|---|---|---|---|---|---|---|
+| **rustqvd (наш)** | Rust + Python | Rust | да | да (byte-identical) | ~3M rows/sec | нет (будет первым) |
+| qvd-utils | Python | Rust (PyO3) | да | нет | ~2M rows/sec | нет |
+| PyQvd | Python | Pure Python | да | да | ~100K rows/sec | — |
+| qvdfile | Python | Pure Python | да | да | очень медленно | — |
+| qvd4js | JavaScript | JS | да | нет | медленно | — |
+| qvdreader | C | C | да | нет | быстро | — |
+
+**Ключевой факт: на crates.io НЕТ ни одного QVD crate.** Мы будем первыми.
+
+### Коммерческие инструменты
+
+| Инструмент | Статус | Описание |
+|---|---|---|
+| EasyQlik QViewer | **Закрыт** (заменён CSViewer) | Был основным QVD-просмотрщиком |
+| EasyQlik CSViewer | Бесплатный | Просмотр QVD, Parquet и других форматов |
+| Q-Eye | Бесплатный | QVD/QVX viewer и editor (Microsoft Store) |
+| QData | Open source | Desktop viewer/editor на PyQvd |
+| Alteryx QVD Tools | Community prototype | Чтение/запись, но с багами (даты=NULL, ошибки symbol table) |
+
+### Тренд QVD → Parquet
+
+С августа 2023 Qlik Sense нативно поддерживает Parquet для STORE/LOAD. Однако:
+- **Проблема dual values**: QVD хранит loosely-typed duals (число+строка), Parquet — strongly-typed. Конвертация теряет данные.
+- **Проблема смешанных типов**: одно поле QVD может содержать int, double и string. Parquet не может.
+- **Размер**: QVD 1.7 ГБ → Parquet без сжатия 6 ГБ (dictionary encoding + bit stuffing в QVD очень эффективны).
+- **Вывод**: QVD остаётся актуальным, особенно внутри Qlik-экосистемы.
+
+---
+
+## 10. Рыночные возможности и боли пользователей
+
+### Что ищут пользователи (и не находят)
+
+1. **SQL-запросы к QVD вне Qlik** — обсуждается на Qlik Community с 2017 года, решения нет
+2. **QVD + DuckDB** — нет расширения DuckDB для QVD
+3. **QVD + ClickHouse** — нет интеграции
+4. **Streaming QVD reader** — все библиотеки грузят файл целиком в память
+5. **Быстрая Python-библиотека с записью** — PyQvd пишет, но медленно; qvd-utils быстрый, но read-only
+
+### Vendor lock-in
+
+- QVD — проприетарный формат, данные заперты внутри Qlik
+- Экспорт QVD из Qlik Cloud **не поддерживается** напрямую
+- Организации хотят использовать QVD-данные в AI/ML пайплайнах
+- Единственный путь — конвертация через Python (медленно) или CSV-export (неэффективно)
+
+### Как rustqvd решает эти проблемы
+
+| Боль пользователя | Решение rustqvd |
+|---|---|
+| "Нужен SQL к QVD" | DataFusion TableProvider / DuckDB VTab |
+| "Нужна конвертация в Parquet" | Arrow RecordBatch → Parquet (без промежуточных файлов) |
+| "QVD reload слишком медленный" | Pre-filter/pre-join вне Qlik, optimized load готового QVD |
+| "Нет streaming reader" | Streaming reader с чанками (планируется) |
+| "Python qvd-библиотека устарела" | PyO3 биндинги, read+write, 30x быстрее PyQvd |
+
+---
+
+## 11. План развития
+
+### Фаза 1 — Core (ГОТОВО)
+
+- [x] Чтение QVD (XML header + symbol tables + bit-stuffed index)
+- [x] Запись QVD (byte-identical roundtrip)
+- [x] EXISTS() через HashSet (O(1) lookup)
+- [x] Python-биндинги (PyO3/maturin)
+- [x] Тестирование на 20 реальных файлах (до 2.8 ГБ, 87M строк)
+- [ ] Публикация на crates.io
+- [ ] Публикация на PyPI
+
+### Фаза 2 — Arrow & Streaming
+
+- [ ] Streaming reader (чтение чанками, не грузить весь файл в память)
+- [ ] Arrow RecordBatch output (мост к DuckDB, DataFusion, Polars)
+- [ ] DuckDB VTab (виртуальная таблица QVD в DuckDB)
+- [ ] CLI утилита (`qvd inspect`, `qvd head`, `qvd convert`, `qvd sql`)
+
+### Фаза 3 — SQL Engine
+
+- [ ] DataFusion TableProvider (SQL-запросы прямо к QVD файлам)
+- [ ] Projection pushdown (читать только нужные колонки)
+- [ ] Filter pushdown (фильтрация на уровне символов)
+- [ ] JOIN нескольких QVD через DataFusion
+- [ ] QVD → Parquet конвертация со сжатием
+
+### Фаза 4 — ETL Platform
+
+- [ ] Инкрементальное слияние QVD файлов
+- [ ] Валидация данных (типы, дубликаты, свежесть)
+- [ ] WASM-модуль для браузера (QVD Viewer Online)
+- [ ] Polars IO plugin
+
+---
+
+## 12. Интеграция с экосистемой Rust Data Engineering
+
+### Ключевой принцип: Arrow как универсальный мост
+
+```
+QVD файл ──► rustqvd ──► Arrow RecordBatch ──┬──► DuckDB (SQL)
+                                               ├──► DataFusion (SQL)
+                                               ├──► Polars (DataFrame)
+                                               ├──► Parquet (файл)
+                                               ├──► ClickHouse (import)
+                                               └──► Delta Lake (таблица)
+```
+
+### DataFusion TableProvider
+
+```rust
+// QVD файлы как SQL-таблицы
+let ctx = SessionContext::new();
+ctx.register_table("sales", Arc::new(QvdTableProvider::open("sales.qvd")?))?;
+
+let df = ctx.sql("
+    SELECT region, SUM(amount) as total
+    FROM sales
+    WHERE date >= '2024-01-01'
+    GROUP BY region
+").await?;
+```
+
+### DuckDB Virtual Table
+
+```rust
+// QVD как виртуальная таблица DuckDB
+let conn = Connection::open_in_memory()?;
+conn.register_table_function::<QvdVTab>("read_qvd")?;
+
+let result = conn.query_arrow("
+    SELECT * FROM read_qvd('facts.qvd') f
+    JOIN read_qvd('dim.qvd') d ON f.id = d.id
+")?;
+```
+
+### Streaming Reader (планируется)
+
+```rust
+// Не грузит весь файл в память
+let reader = QvdStreamReader::open("facts_50gb.qvd")?;
+for batch in reader.batches(65536) {
+    // batch: arrow::RecordBatch (~65K строк)
+    // обрабатываем чанками, RAM = O(chunk_size)
+}
+```
+
+### Ландшафт Rust Data Engineering
+
+| Crate | Назначение | Связь с rustqvd |
+|---|---|---|
+| `arrow` | In-memory columnar формат | Выход rustqvd → RecordBatch |
+| `datafusion` | SQL query engine | TableProvider для QVD |
+| `polars` | DataFrame библиотека | IO plugin для QVD |
+| `duckdb` | Embedded OLAP БД | VTab для QVD |
+| `delta-rs` | Delta Lake таблицы | QVD → Delta конвертация |
+| `parquet` | Parquet файлы | QVD → Parquet конвертация |
+| `lance` | AI-optimized формат | QVD → Lance конвертация |
+
+---
+
+## 13. Практические сценарии применения
+
+### Сценарий 1: ETL вне Qlik
+
+```
+Проблема: 400 Qlik скриптов, 3.5 ТБ QVD, тяжёлые JOIN на 3-15 млрд строк.
+          Qlik съедает 390 ГБ RAM, reload занимает часы.
+
+Решение:
+  Source QVD → [rustqvd + DuckDB: JOIN, GROUP BY, Window] → Result QVD
+                50 ГБ RAM, минуты
+
+  Result QVD → [Qlik: optimized load] → Dashboard
+                0 ГБ RAM, секунды
+```
+
+### Сценарий 2: Инкрементальная обработка
+
+```
+День N:
+  prev_result.qvd (готов)  +  facts_day_N.qvd (30 МБ)
+       ↓                          ↓
+  [rustqvd + DuckDB: UNION ALL + GROUP BY]
+       ↓
+  result_day_N.qvd
+
+Время: секунды. RAM: < 1 ГБ. Qlik не нужен.
+```
+
+### Сценарий 3: Pre-filter для Qlik
+
+```
+Проблема: WHERE EXISTS() ломает optimized load в Qlik.
+
+Решение:
+  big_facts.qvd ──► [rustqvd: filter_rows_by_exists_fast()]
+                         ↓
+                    filtered_facts.qvd (меньший файл)
+                         ↓
+                    [Qlik: optimized load — 100x быстрее]
+```
+
+### Сценарий 4: QVD как источник для BI без Qlik
+
+```
+QVD файлы (3.5 ТБ) ──► [DataFusion + rustqvd]
+                              ↓
+                         SQL API / REST API
+                              ↓
+                    Metabase / Grafana / Jupyter
+```
+
+### Сценарий 5: Валидация и мониторинг
+
+```bash
+# CLI: проверка свежести данных
+qvd inspect /data/qvd/**/*.qvd --check-freshness 24h
+
+# CLI: поиск дубликатов
+qvd sql "SELECT id, COUNT(*) FROM 'facts.qvd' GROUP BY id HAVING COUNT(*) > 1"
+
+# CLI: конвертация
+qvd convert facts.qvd --to parquet --compression zstd
+```
+
+---
+
+## 14. Известные edge cases формата QVD
+
+### Обнаруженные особенности
+
+1. **Dual values для дат**: TIME и TIMESTAMP оба хранятся как dual double. Различаются только по `<NumberFormat><Type>` в XML (TIME vs TIMESTAMP).
+
+2. **Смешанные типы в одном поле**: QVD позволяет хранить int, double и string в одном поле. При конвертации в strongly-typed форматы (Parquet, Arrow) нужно выбирать общий тип.
+
+3. **Symbol table inconsistency**: при записи QVD критически важно точно воспроизвести формат symbol table. Прототип Alteryx QVD Tools имеет баг с "Symbol table inconsistency" — наша библиотека это решает через byte-identical roundtrip.
+
+4. **Нулевые байты после XML**: между XML и бинарной частью могут быть `\r\n\0` или просто `\0`. Наш парсер обрабатывает оба варианта.
+
+5. **NumberFormat Type**: в 90% файлов = "UNKNOWN" или "0". Тип данных определяется ТОЛЬКО по flag byte перед каждым символом в symbol table, а НЕ из XML метаданных.
+
+6. **BitOffset не обязательно последовательны**: поля могут быть расположены в index table в произвольном порядке (определяется BitOffset), не совпадающем с порядком в XML.
+
+7. **Пустые symbol tables**: если `NoOfSymbols = 0` и `BitWidth = 0`, поле всегда NULL.
+
+8. **Кодировка строк**: UTF-8 (указано в XML заголовке). Поддерживаются Unicode символы включая emoji.
 
 ---
 
 ## Источники
 
+### Формат QVD
 - [PyQvd Documentation — QVD File Format](https://pyqvd.readthedocs.io/stable/guide/qvd-file-format.html)
 - [Qlik Cloud Help — QVD files](https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/Scripting/QVD-files-scripting.htm)
-- [SBentley/qvd-utils (GitHub)](https://github.com/SBentley/qvd-utils)
-- [MuellerConstantin/PyQvd (GitHub)](https://github.com/MuellerConstantin/PyQvd)
-- [korolmi/qvdfile (GitHub)](https://github.com/korolmi/qvdfile)
-- [devinsmith/qvdreader (GitHub)](https://github.com/devinsmith/qvdreader)
+- [Qlik Help — Working with QVD files](https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/Scripting/work-with-QVD-files.htm)
+- [QVD Reverse Engineering Blog (Alteryx)](https://kongsoncheung.blogspot.com/2023/07/qlikview-data-file-reverse-engineering.html)
 - Статьи на Хабре: "QVD файлы — что внутри" (части 1-3)
+
+### Существующие реализации
+- [SBentley/qvd-utils (GitHub)](https://github.com/SBentley/qvd-utils) — Rust+PyO3, read-only
+- [MuellerConstantin/PyQvd (GitHub)](https://github.com/MuellerConstantin/PyQvd) — Pure Python, read+write
+- [korolmi/qvdfile (GitHub)](https://github.com/korolmi/qvdfile) — исследовательская версия
+- [devinsmith/qvdreader (GitHub)](https://github.com/devinsmith/qvdreader) — C
+- [mafuentes22/qvd-reader (GitHub)](https://github.com/mafuentes22/qvd-reader) — JavaScript
+- [MuellerConstantin/qvd4js (GitHub)](https://github.com/MuellerConstantin/qvd4js) — JavaScript/Node.js
+- [MuellerConstantin/qdata (GitHub)](https://github.com/MuellerConstantin/qdata) — Desktop viewer
+- [kongson-cheung/Alteryx-QVD-Tools (GitHub)](https://github.com/kongson-cheung/Alteryx-QVD-Tools) — Alteryx prototype
+- [ralfbecher/QVDConverter (GitHub)](https://github.com/ralfbecher/QlikView_QVDReader_Examples) — Java
+
+### Qlik производительность
 - [Qlik Help — EXISTS function](https://help.qlik.com/en-US/sense/November2025/Subsystems/Hub/Content/Sense_Hub/Scripting/InterRecordFunctions/Exists.htm)
+- [BitMetric — Qlik Optimized Load](https://www.bitmetric.nl/blog/qlik-optimized-load/)
+- [Quick Intelligence — Optimised QVD Loads](https://www.quickintelligence.co.uk/qlikview-optimised-qvd-loads/)
+- [BigBear.ai — Optimizing Qlik Load Time](https://bigbear.ai/blog/optimizing-qlik-load-time/)
+- [Qlik Community — EXISTS and Optimized Load](https://community.qlik.com/t5/QlikView-App-Dev/using-exists-function-to-load-qvd-as-optimized-load/td-p/123585)
+- [Qlik Community — ApplyMap vs Join Performance](https://community.qlik.com/t5/Visualization-and-Usability/Lookup-vs-Join-Performance-ApplyMap-vs-Inner-Join/td-p/1811152)
+
+### Rust Data Engineering
+- [DataFusion — TableProvider trait](https://docs.rs/datafusion/latest/datafusion/catalog/trait.TableProvider.html)
+- [DataFusion — Custom Table Providers guide](https://datafusion.apache.org/library-user-guide/custom-table-providers.html)
+- [datafusion-table-providers (GitHub)](https://github.com/datafusion-contrib/datafusion-table-providers)
+- [DuckDB Rust crate — VTab](https://docs.rs/duckdb/latest/duckdb/)
+- [arrow-rs — RecordBatch](https://docs.rs/arrow/latest/arrow/record_batch/struct.RecordBatch.html)
+- [Polars — IO Plugins](https://docs.pola.rs/user-guide/plugins/io_plugins/)
+- [Polars vs DataFusion 2026](https://dasroot.net/posts/2026/01/rust-data-processing-polars-vs-datafusion/)
+
+### Рыночный контекст
+- [Pandas Issue #18259 — read_qvd request](https://github.com/pandas-dev/pandas/issues/18259)
+- [Qlik Community — SQL on QVD](https://community.qlik.com/t5/QlikView/How-to-perform-SQL-query-on-QVD/td-p/1568409)
+- [Quo Vadis QVD — vendor lock-in](https://www.linkedin.com/pulse/quo-vadis-qvd-need-qlik-sense-data-files-2020-boris-michel)
+- [Rise of Parquet as QVD replacement](https://medium.com/@durgesh.patel13/rise-of-parquet-files-as-a-replacement-for-qvd-in-data-analytics-0d9ed6668154)
+- [Offload Qlik data to Lakehouse](https://medium.com/@irregularbi/offload-your-qlik-data-into-a-lakehouse-finally-1c6a27b9733c)
+- [Qlik Community — Parquet vs QVD](https://community.qlik.com/t5/Connectivity-Data-Prep/parquet-vs-qvd-QS-August-2023/td-p/2111224)
+- [EasyQlik QViewer (retired)](https://easyqlik.com/qviewer/)
+- [EasyQlik CSViewer](https://easyqlik.com/csviewer/)
+- [Q-Eye QVD Viewer](https://www.etl-tools.com/products/q-eye.html)
