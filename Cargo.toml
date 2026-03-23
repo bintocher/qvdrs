@@ -1,6 +1,6 @@
 [package]
 name = "qvd"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "High-performance library for reading, writing and converting Qlik QVD files with Parquet/Arrow support"
 license = "MIT"

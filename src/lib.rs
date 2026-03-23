@@ -35,12 +35,14 @@
 //! use qvd::{read_qvd_file, ExistsIndex, filter_rows_by_exists_fast};
 //!
 //! let clients = read_qvd_file("clients.qvd").unwrap();
-//! let index = ExistsIndex::new(&clients, "ClientID");
+//! let index = ExistsIndex::from_column(&clients, "ClientID").unwrap();
 //!
 //! assert!(index.exists("12345"));
 //!
 //! let facts = read_qvd_file("facts.qvd").unwrap();
-//! let filtered = filter_rows_by_exists_fast(&facts, "ClientID", &index);
+//! // col_idx = column index for "ClientID" in facts table
+//! let col_idx = 0;
+//! let filtered = filter_rows_by_exists_fast(&facts, col_idx, &index);
 //! ```
 //!
 //! ### Streaming reader

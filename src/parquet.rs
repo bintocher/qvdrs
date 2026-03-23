@@ -732,21 +732,28 @@ pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
         let qvd_field = &table.header.fields[col_idx];
         let symbols = &table.symbols[col_idx];
         let indices = &table.row_indices[col_idx];
-        let has_null = indices.iter().any(|&i| i < 0);
+        let num_symbols = symbols.len();
+        let has_null = indices.iter().any(|&i| i < 0 || i as usize >= num_symbols);
         let arrow_type = infer_arrow_type(qvd_field, symbols);
 
         fields.push(Field::new(&qvd_field.field_name, arrow_type.clone(), has_null));
+
+        // Helper: resolve index to symbol, returning None for NULL or out-of-bounds
+        let resolve = |idx: i64| -> Option<&QvdSymbol> {
+            if idx < 0 || (idx as usize) >= num_symbols {
+                None
+            } else {
+                Some(&symbols[idx as usize])
+            }
+        };
 
         let array: Arc<dyn Array> = match &arrow_type {
             DataType::Int64 => {
                 let mut builder = Int64Builder::with_capacity(num_rows);
                 for row in 0..num_rows {
-                    let idx = indices[row];
-                    if idx < 0 {
-                        builder.append_null();
-                    } else {
-                        let sym = &symbols[idx as usize];
-                        match sym {
+                    match resolve(indices[row]) {
+                        None => builder.append_null(),
+                        Some(sym) => match sym {
                             QvdSymbol::Int(v) | QvdSymbol::DualInt(v, _) => builder.append_value(*v as i64),
                             QvdSymbol::Double(v) | QvdSymbol::DualDouble(v, _) => builder.append_value(*v as i64),
                             QvdSymbol::Text(s) => {
@@ -756,7 +763,7 @@ pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
                                     builder.append_null();
                                 }
                             }
-                        }
+                        },
                     }
                 }
                 Arc::new(builder.finish())
@@ -764,12 +771,9 @@ pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
             DataType::Float64 => {
                 let mut builder = Float64Builder::with_capacity(num_rows);
                 for row in 0..num_rows {
-                    let idx = indices[row];
-                    if idx < 0 {
-                        builder.append_null();
-                    } else {
-                        let sym = &symbols[idx as usize];
-                        match sym.as_f64() {
+                    match resolve(indices[row]) {
+                        None => builder.append_null(),
+                        Some(sym) => match sym.as_f64() {
                             Some(v) => builder.append_value(v),
                             None => {
                                 if let QvdSymbol::Text(s) = sym {
@@ -782,7 +786,7 @@ pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
                                     builder.append_null();
                                 }
                             }
-                        }
+                        },
                     }
                 }
                 Arc::new(builder.finish())
@@ -790,26 +794,25 @@ pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
             DataType::Date32 => {
                 let mut builder = Date32Builder::with_capacity(num_rows);
                 for row in 0..num_rows {
-                    let idx = indices[row];
-                    if idx < 0 {
-                        builder.append_null();
-                    } else {
-                        let sym = &symbols[idx as usize];
-                        let qlik_days = match sym {
-                            QvdSymbol::Int(v) | QvdSymbol::DualInt(v, _) => *v as f64,
-                            QvdSymbol::Double(v) | QvdSymbol::DualDouble(v, _) => *v,
-                            QvdSymbol::Text(s) => {
-                                if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-                                    let epoch = chrono::NaiveDate::from_ymd_opt(1899, 12, 30).unwrap();
-                                    (d - epoch).num_days() as f64
-                                } else {
-                                    builder.append_null();
-                                    continue;
+                    match resolve(indices[row]) {
+                        None => { builder.append_null(); }
+                        Some(sym) => {
+                            let qlik_days = match sym {
+                                QvdSymbol::Int(v) | QvdSymbol::DualInt(v, _) => *v as f64,
+                                QvdSymbol::Double(v) | QvdSymbol::DualDouble(v, _) => *v,
+                                QvdSymbol::Text(s) => {
+                                    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                                        let epoch = chrono::NaiveDate::from_ymd_opt(1899, 12, 30).unwrap();
+                                        (d - epoch).num_days() as f64
+                                    } else {
+                                        builder.append_null();
+                                        continue;
+                                    }
                                 }
-                            }
-                        };
-                        let unix_days = qlik_days as i32 - UNIX_TO_QLIK_DAYS as i32;
-                        builder.append_value(unix_days);
+                            };
+                            let unix_days = qlik_days as i32 - UNIX_TO_QLIK_DAYS as i32;
+                            builder.append_value(unix_days);
+                        }
                     }
                 }
                 Arc::new(builder.finish())
@@ -817,22 +820,21 @@ pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
             DataType::Timestamp(TimeUnit::Microsecond, _) => {
                 let mut builder = TimestampMicrosecondBuilder::with_capacity(num_rows);
                 for row in 0..num_rows {
-                    let idx = indices[row];
-                    if idx < 0 {
-                        builder.append_null();
-                    } else {
-                        let sym = &symbols[idx as usize];
-                        let qlik_serial = match sym {
-                            QvdSymbol::Int(v) | QvdSymbol::DualInt(v, _) => *v as f64,
-                            QvdSymbol::Double(v) | QvdSymbol::DualDouble(v, _) => *v,
-                            QvdSymbol::Text(_) => {
-                                builder.append_null();
-                                continue;
-                            }
-                        };
-                        let unix_secs = (qlik_serial - UNIX_TO_QLIK_DAYS as f64) * 86_400.0;
-                        let micros = (unix_secs * 1_000_000.0) as i64;
-                        builder.append_value(micros);
+                    match resolve(indices[row]) {
+                        None => { builder.append_null(); }
+                        Some(sym) => {
+                            let qlik_serial = match sym {
+                                QvdSymbol::Int(v) | QvdSymbol::DualInt(v, _) => *v as f64,
+                                QvdSymbol::Double(v) | QvdSymbol::DualDouble(v, _) => *v,
+                                QvdSymbol::Text(_) => {
+                                    builder.append_null();
+                                    continue;
+                                }
+                            };
+                            let unix_secs = (qlik_serial - UNIX_TO_QLIK_DAYS as f64) * 86_400.0;
+                            let micros = (unix_secs * 1_000_000.0) as i64;
+                            builder.append_value(micros);
+                        }
                     }
                 }
                 Arc::new(builder.finish())
@@ -840,12 +842,9 @@ pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
             _ => {
                 let mut builder = StringBuilder::with_capacity(num_rows, num_rows * 16);
                 for row in 0..num_rows {
-                    let idx = indices[row];
-                    if idx < 0 {
-                        builder.append_null();
-                    } else {
-                        let sym = &symbols[idx as usize];
-                        builder.append_value(sym.to_string_repr());
+                    match resolve(indices[row]) {
+                        None => builder.append_null(),
+                        Some(sym) => builder.append_value(sym.to_string_repr()),
                     }
                 }
                 Arc::new(builder.finish())
