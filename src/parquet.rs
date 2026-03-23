@@ -28,7 +28,7 @@ struct ColumnResult {
 /// Read a Parquet file and convert it to a QvdTable.
 pub fn read_parquet_to_qvd(path: &str) -> QvdResult<QvdTable> {
     let file = std::fs::File::open(path)
-        .map_err(|e| QvdError::Io(e))?;
+        .map_err(QvdError::Io)?;
 
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .map_err(|e| QvdError::Format(format!("Failed to open parquet: {}", e)))?;
@@ -175,20 +175,16 @@ fn process_dict_string_column(arrays: &[&dyn Array], total_rows: usize) -> Colum
 
     for &array in arrays {
         // Try each dictionary key type
-        if let Some(result) = try_process_dict::<Int32Type>(array, &mut global_map, &mut symbols, &mut indices, &mut has_null) {
-            if !result { /* failed downcast, try next */ }
+        if try_process_dict::<Int32Type>(array, &mut global_map, &mut symbols, &mut indices, &mut has_null).is_some() {
             continue;
         }
-        if let Some(result) = try_process_dict::<Int16Type>(array, &mut global_map, &mut symbols, &mut indices, &mut has_null) {
-            if !result { }
+        if try_process_dict::<Int16Type>(array, &mut global_map, &mut symbols, &mut indices, &mut has_null).is_some() {
             continue;
         }
-        if let Some(result) = try_process_dict::<Int8Type>(array, &mut global_map, &mut symbols, &mut indices, &mut has_null) {
-            if !result { }
+        if try_process_dict::<Int8Type>(array, &mut global_map, &mut symbols, &mut indices, &mut has_null).is_some() {
             continue;
         }
-        if let Some(result) = try_process_dict::<Int64Type>(array, &mut global_map, &mut symbols, &mut indices, &mut has_null) {
-            if !result { }
+        if try_process_dict::<Int64Type>(array, &mut global_map, &mut symbols, &mut indices, &mut has_null).is_some() {
             continue;
         }
         // Fallback: process row-by-row
@@ -724,6 +720,7 @@ fn infer_arrow_type(field: &QvdFieldHeader, symbols: &[QvdSymbol]) -> DataType {
 }
 
 /// Convert a QvdTable to an Arrow RecordBatch.
+#[allow(clippy::needless_range_loop)]
 pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
     let num_rows = table.num_rows();
     let num_cols = table.num_cols();
@@ -881,7 +878,7 @@ pub enum ParquetCompression {
 }
 
 impl ParquetCompression {
-    pub fn from_str(s: &str) -> QvdResult<Self> {
+    pub fn parse(s: &str) -> QvdResult<Self> {
         match s.to_lowercase().as_str() {
             "none" | "uncompressed" => Ok(Self::None),
             "snappy" => Ok(Self::Snappy),
@@ -924,7 +921,7 @@ pub fn write_qvd_table_to_parquet(
         .build();
 
     let file = std::fs::File::create(parquet_path)
-        .map_err(|e| QvdError::Io(e))?;
+        .map_err(QvdError::Io)?;
 
     let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))
         .map_err(|e| QvdError::Format(format!("Failed to create parquet writer: {}", e)))?;

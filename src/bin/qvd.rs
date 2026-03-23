@@ -74,7 +74,7 @@ fn cmd_convert(input: &str, output: &str, compression: &str) {
         qvd::convert_parquet_to_qvd(input, output)
     } else if input_lower.ends_with(".qvd") && output_lower.ends_with(".parquet") {
         // QVD → Parquet
-        let comp = match ParquetCompression::from_str(compression) {
+        let comp = match ParquetCompression::parse(compression) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Error: {}", e);
@@ -100,7 +100,7 @@ fn cmd_convert(input: &str, output: &str, compression: &str) {
         qvd::write_qvd_file(&table, output)
     } else if input_lower.ends_with(".parquet") && output_lower.ends_with(".parquet") {
         // Parquet → Parquet (recompress)
-        let comp = match ParquetCompression::from_str(compression) {
+        let comp = match ParquetCompression::parse(compression) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Error: {}", e);

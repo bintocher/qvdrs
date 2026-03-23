@@ -139,7 +139,7 @@ impl PyQvdTable {
     /// compression: "none", "snappy", "gzip", "lz4", "zstd" (default: "snappy")
     #[pyo3(signature = (path, compression=None))]
     fn save_as_parquet(&self, path: &str, compression: Option<&str>) -> PyResult<()> {
-        let comp = crate::parquet::ParquetCompression::from_str(compression.unwrap_or("snappy"))
+        let comp = crate::parquet::ParquetCompression::parse(compression.unwrap_or("snappy"))
             .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
         crate::parquet::write_qvd_table_to_parquet(&self.inner, path, comp)
             .map_err(|e| PyValueError::new_err(format!("{}", e)))
@@ -255,7 +255,7 @@ fn convert_parquet_to_qvd(parquet_path: &str, qvd_path: &str) -> PyResult<()> {
 #[pyfunction]
 #[pyo3(signature = (qvd_path, parquet_path, compression=None))]
 fn convert_qvd_to_parquet(qvd_path: &str, parquet_path: &str, compression: Option<&str>) -> PyResult<()> {
-    let comp = crate::parquet::ParquetCompression::from_str(compression.unwrap_or("snappy"))
+    let comp = crate::parquet::ParquetCompression::parse(compression.unwrap_or("snappy"))
         .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
     crate::parquet::convert_qvd_to_parquet(qvd_path, parquet_path, comp)
         .map_err(|e| PyValueError::new_err(format!("{}", e)))
