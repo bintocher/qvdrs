@@ -27,7 +27,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist -i python3.13
           manylinux: auto
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -45,7 +45,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          args: --release --out dist --find-interpreter
+          args: --release --out dist -i python3.13
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -70,7 +70,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}-apple-darwin
-          args: --release --out dist --find-interpreter
+          args: --release --out dist -i python3.13
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
