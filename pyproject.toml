@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "qvd-rs"
+name = "qvdrs"
 version = "0.1.0"
 description = "High-performance Qlik QVD file reader/writer with Parquet conversion — Rust-powered Python bindings"
 readme = "README.md"

@@ -102,7 +102,7 @@ jobs:
     needs: [linux, windows, macos, sdist]
     environment:
       name: pypi
-      url: https://pypi.org/p/qvd-rs
+      url: https://pypi.org/p/qvdrs
     permissions:
       id-token: write
     steps:

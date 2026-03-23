@@ -1,7 +1,7 @@
 # qvd
 
 [![Crates.io](https://img.shields.io/crates/v/qvd.svg)](https://crates.io/crates/qvd)
-[![PyPI](https://img.shields.io/pypi/v/qvd-rs.svg)](https://pypi.org/project/qvd-rs/)
+[![PyPI](https://img.shields.io/pypi/v/qvdrs.svg)](https://pypi.org/project/qvdrs/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 High-performance Rust library for reading, writing and converting Qlik QVD files. With Parquet/Arrow interop, streaming reader, CLI tool, and Python bindings.
@@ -23,14 +23,14 @@ High-performance Rust library for reading, writing and converting Qlik QVD files
 
 Tested on 20 real QVD files (11 KB to 2.8 GB):
 
-| File | Size | Rows | Read | Write |
-|------|------|------|------|-------|
-| test_qvd.qvd | 11 KB | 12 | 0.0s | 0.0s |
-| AAPL.qvd | 418 KB | 2,746 | 0.0s | 0.0s |
-| kpi_snapshot.qvd | 41 MB | 465,810 | 0.5s | 0.0s |
-| client_attribution.qvd | 587 MB | 5,458,618 | 6.1s | 0.4s |
-| client_action_calendar.qvd | 1.7 GB | 87,617,047 | 36.8s | 1.6s |
-| sportcatalogue.qvd | 2.8 GB | 11,907,648 | 24.3s | 2.4s |
+| File | Size | Rows | Columns | Read | Write |
+|------|------|------|---------|------|-------|
+| sample_tiny.qvd | 11 KB | 12 | 5 | 0.0s | 0.0s |
+| sample_small.qvd | 418 KB | 2,746 | 8 | 0.0s | 0.0s |
+| sample_medium.qvd | 41 MB | 465,810 | 12 | 0.5s | 0.0s |
+| sample_large.qvd | 587 MB | 5,458,618 | 15 | 6.1s | 0.4s |
+| sample_xlarge.qvd | 1.7 GB | 87,617,047 | 6 | 36.8s | 1.6s |
+| sample_huge.qvd | 2.8 GB | 11,907,648 | 42 | 24.3s | 2.4s |
 
 All 20 files — **byte-identical roundtrip** (MD5 match).
 
@@ -66,13 +66,13 @@ cargo install qvd --features cli
 ### Python
 
 ```bash
-pip install qvd-rs
+pip install qvdrs
 ```
 
 Or with uv:
 
 ```bash
-uv pip install qvd-rs
+uv pip install qvdrs
 ```
 
 ## Quick Start — Rust
@@ -222,6 +222,37 @@ src/
 | `parquet_support` | arrow, parquet, chrono | Parquet/Arrow conversion |
 | `cli` | + clap | CLI binary |
 | `python` | + pyo3 | Python bindings |
+
+## Publishing
+
+### crates.io
+
+1. Go to [crates.io/settings/tokens](https://crates.io/settings/tokens)
+2. Click **"New Token"**
+3. Name: `github-actions`, Scopes: **publish-update** for crate `qvd`
+4. Copy the token
+5. In GitHub repo → Settings → Secrets and variables → Actions → **New repository secret**
+6. Name: `CARGO_REGISTRY_TOKEN`, Value: paste the token
+
+### PyPI
+
+1. Go to [pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/)
+2. Add a new **Trusted Publisher** (pending):
+   - PyPI project name: `qvdrs`
+   - Owner: `bintocher`
+   - Repository: `qvdrs`
+   - Workflow name: `release-pypi.yml`
+   - Environment name: `pypi`
+3. In GitHub repo → Settings → Environments → Create **"pypi"** environment
+
+### Triggering a release
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Then create a GitHub Release from the tag — both crates.io and PyPI workflows will trigger automatically.
 
 ## License
 
