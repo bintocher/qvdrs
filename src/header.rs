@@ -204,8 +204,20 @@ pub fn parse_xml_header(xml: &str) -> QvdResult<QvdTableHeader> {
         compression: xml_tag_value(root, "Compression"),
         record_byte_size: xml_tag_usize(root, "RecordByteSize"),
         no_of_records: xml_tag_usize(root, "NoOfRecords"),
-        offset: xml_tag_usize(root, "Offset"),
-        length: xml_tag_usize(root, "Length"),
+        // Table-level Offset/Length must be parsed from AFTER </Fields> to avoid
+        // picking up field-level Offset/Length values inside <QvdFieldHeader> elements.
+        offset: {
+            let after_fields = root.rfind("</Fields>")
+                .map(|pos| &root[pos..])
+                .unwrap_or(root);
+            xml_tag_usize(after_fields, "Offset")
+        },
+        length: {
+            let after_fields = root.rfind("</Fields>")
+                .map(|pos| &root[pos..])
+                .unwrap_or(root);
+            xml_tag_usize(after_fields, "Length")
+        },
         lineage,
         comment: xml_tag_value(root, "Comment"),
     })
