@@ -15,8 +15,7 @@ exclude = ["qvd_input/", "qvd_output/", "*.qvd", "*.parquet"]
 
 [lib]
 name = "qvd"
-# cdylib is added automatically by maturin for Python builds
-crate-type = ["lib"]
+crate-type = ["lib", "cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module"], optional = true }
