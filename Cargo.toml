@@ -1,33 +1,38 @@
 [package]
 name = "qvd"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
-description = "High-performance library for reading, writing and converting Qlik QVD files with Parquet/Arrow support"
+description = "High-performance library for reading, writing and converting Qlik QVD files with Parquet/Arrow/DataFusion support"
 license = "MIT"
 repository = "https://github.com/bintocher/qvdrs"
 homepage = "https://github.com/bintocher/qvdrs"
 documentation = "https://docs.rs/qvd"
 readme = "README.md"
-keywords = ["qvd", "qlik", "parquet", "arrow", "etl"]
+keywords = ["qvd", "qlik", "parquet", "arrow", "datafusion"]
 categories = ["parser-implementations", "encoding", "command-line-utilities"]
 authors = ["Stanislav Chernov <bintocher>"]
 exclude = ["qvd_input/", "qvd_output/", "*.qvd", "*.parquet"]
 
 [lib]
 name = "qvd"
-crate-type = ["lib", "cdylib"]
+# cdylib is added automatically by maturin for Python builds
+crate-type = ["lib"]
 
 [dependencies]
-pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.28", features = ["extension-module"], optional = true }
 parquet = { version = "58", optional = true }
 arrow = { version = "58", default-features = false, features = ["chrono-tz"], optional = true }
 chrono = { version = "0.4", optional = true }
 clap = { version = "4.6", features = ["derive"], optional = true }
+datafusion = { version = "53", optional = true }
+async-trait = { version = "0.1", optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [features]
 default = []
-python = ["pyo3", "parquet", "arrow", "chrono"]
 parquet_support = ["parquet", "arrow", "chrono"]
+datafusion_support = ["dep:datafusion", "dep:async-trait", "dep:tokio", "parquet_support"]
+python = ["pyo3", "parquet", "arrow", "chrono", "arrow/pyarrow", "arrow/ffi"]
 cli = ["parquet_support", "clap"]
 
 [dev-dependencies]

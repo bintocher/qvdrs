@@ -1,7 +1,10 @@
 use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyValueError, PyImportError};
 use pyo3::types::{PyDict, PyList};
 use std::collections::HashSet;
+
+use arrow::pyarrow::{ToPyArrow, FromPyArrow};
+use arrow::record_batch::RecordBatch;
 
 use crate::reader;
 use crate::writer;
@@ -145,6 +148,76 @@ impl PyQvdTable {
             .map_err(|e| PyValueError::new_err(format!("{}", e)))
     }
 
+    /// Convert to a PyArrow RecordBatch (zero-copy via Arrow C Data Interface).
+    ///
+    /// Requires `pyarrow` to be installed.
+    ///
+    /// ```python
+    /// table = qvd.read_qvd("data.qvd")
+    /// batch = table.to_arrow()
+    /// ```
+    fn to_arrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let batch = crate::parquet::qvd_to_record_batch(&self.inner)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        batch.to_pyarrow(py)
+    }
+
+    /// Create a QvdTable from a PyArrow RecordBatch.
+    ///
+    /// ```python
+    /// table = qvd.QvdTable.from_arrow(batch, table_name="my_table")
+    /// table.save("output.qvd")
+    /// ```
+    #[staticmethod]
+    #[pyo3(signature = (batch, table_name=None))]
+    fn from_arrow(batch: &Bound<'_, PyAny>, table_name: Option<&str>) -> PyResult<Self> {
+        let batch = RecordBatch::from_pyarrow_bound(batch)
+            .map_err(|e| PyValueError::new_err(format!("Invalid RecordBatch: {}", e)))?;
+        let table = crate::parquet::record_batch_to_qvd(&batch, table_name.unwrap_or("table"))
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        Ok(PyQvdTable { inner: table })
+    }
+
+    /// Convert to a pandas DataFrame.
+    ///
+    /// Requires `pyarrow` and `pandas` to be installed.
+    ///
+    /// ```python
+    /// df = qvd.read_qvd("data.qvd").to_pandas()
+    /// ```
+    fn to_pandas<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let batch = crate::parquet::qvd_to_record_batch(&self.inner)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        let pyarrow_batch = batch.to_pyarrow(py)?;
+        let pa = py.import("pyarrow")
+            .map_err(|_| PyImportError::new_err("pyarrow is required: pip install pyarrow"))?;
+        let pa_table_cls = pa.getattr("Table")?;
+        let table = pa_table_cls.call_method1("from_batches", (vec![pyarrow_batch],))?;
+        let df = table.call_method0("to_pandas")?;
+        Ok(df)
+    }
+
+    /// Convert to a Polars DataFrame.
+    ///
+    /// Requires `pyarrow` and `polars` to be installed.
+    ///
+    /// ```python
+    /// df = qvd.read_qvd("data.qvd").to_polars()
+    /// ```
+    fn to_polars<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let batch = crate::parquet::qvd_to_record_batch(&self.inner)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        let pyarrow_batch = batch.to_pyarrow(py)?;
+        let pa = py.import("pyarrow")
+            .map_err(|_| PyImportError::new_err("pyarrow is required: pip install pyarrow"))?;
+        let pa_table_cls = pa.getattr("Table")?;
+        let table = pa_table_cls.call_method1("from_batches", (vec![pyarrow_batch],))?;
+        let pl = py.import("polars")
+            .map_err(|_| PyImportError::new_err("polars is required: pip install polars"))?;
+        let df = pl.call_method1("from_arrow", (table,))?;
+        Ok(df)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "QvdTable(table='{}', rows={}, cols={})",
@@ -173,7 +246,7 @@ impl PyExistsIndex {
     fn new(table: &PyQvdTable, col_name: &str) -> PyResult<Self> {
         let col = table.inner.header.fields.iter()
             .position(|f| f.field_name == col_name)
-            .unwrap();
+            .ok_or_else(|| PyValueError::new_err(format!("Column '{}' not found", col_name)))?;
         let mut values = HashSet::with_capacity(table.inner.symbols[col].len());
         for sym in &table.inner.symbols[col] {
             values.insert(sym.to_string_repr());
@@ -243,6 +316,30 @@ fn read_qvd(path: &str) -> PyResult<PyQvdTable> {
     PyQvdTable::load(path)
 }
 
+/// Read a QVD file and return a PyArrow RecordBatch directly.
+#[pyfunction]
+fn read_qvd_to_arrow<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+    let table = reader::read_qvd_file(path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let batch = crate::parquet::qvd_to_record_batch(&table)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    batch.to_pyarrow(py)
+}
+
+/// Read a QVD file and return a pandas DataFrame directly.
+#[pyfunction]
+fn read_qvd_to_pandas<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+    let t = PyQvdTable::load(path)?;
+    t.to_pandas(py)
+}
+
+/// Read a QVD file and return a Polars DataFrame directly.
+#[pyfunction]
+fn read_qvd_to_polars<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+    let t = PyQvdTable::load(path)?;
+    t.to_polars(py)
+}
+
 /// Convert a Parquet file to a QVD file.
 #[pyfunction]
 fn convert_parquet_to_qvd(parquet_path: &str, qvd_path: &str) -> PyResult<()> {
@@ -270,5 +367,8 @@ fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(filter_exists, m)?)?;
     m.add_function(wrap_pyfunction!(convert_parquet_to_qvd, m)?)?;
     m.add_function(wrap_pyfunction!(convert_qvd_to_parquet, m)?)?;
+    m.add_function(wrap_pyfunction!(read_qvd_to_arrow, m)?)?;
+    m.add_function(wrap_pyfunction!(read_qvd_to_pandas, m)?)?;
+    m.add_function(wrap_pyfunction!(read_qvd_to_polars, m)?)?;
     Ok(())
 }

@@ -8,6 +8,8 @@ pub enum QvdError {
     Format(String),
     Utf8(std::string::FromUtf8Error),
     SymbolIndex { field: String, index: i64, num_symbols: usize },
+    #[cfg(feature = "datafusion_support")]
+    DataFusion(datafusion::error::DataFusionError),
 }
 
 impl fmt::Display for QvdError {
@@ -20,6 +22,8 @@ impl fmt::Display for QvdError {
             QvdError::SymbolIndex { field, index, num_symbols } => {
                 write!(f, "Symbol index out of bounds: field={}, index={}, symbols={}", field, index, num_symbols)
             }
+            #[cfg(feature = "datafusion_support")]
+            QvdError::DataFusion(e) => write!(f, "DataFusion error: {}", e),
         }
     }
 }
@@ -32,6 +36,18 @@ impl From<std::io::Error> for QvdError {
 
 impl From<std::string::FromUtf8Error> for QvdError {
     fn from(e: std::string::FromUtf8Error) -> Self { QvdError::Utf8(e) }
+}
+
+#[cfg(feature = "datafusion_support")]
+impl From<datafusion::error::DataFusionError> for QvdError {
+    fn from(e: datafusion::error::DataFusionError) -> Self { QvdError::DataFusion(e) }
+}
+
+#[cfg(feature = "datafusion_support")]
+impl From<QvdError> for datafusion::error::DataFusionError {
+    fn from(e: QvdError) -> Self {
+        datafusion::error::DataFusionError::External(Box::new(e))
+    }
 }
 
 /// Result type alias for QVD operations.

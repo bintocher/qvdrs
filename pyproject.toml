@@ -4,11 +4,11 @@ build-backend = "maturin"
 
 [project]
 name = "qvdrs"
-version = "0.1.1"
-description = "High-performance Qlik QVD file reader/writer with Parquet conversion — Rust-powered Python bindings"
+version = "0.2.0"
+description = "High-performance Qlik QVD file reader/writer with Parquet/Arrow/DataFusion support — Rust-powered Python bindings (PyArrow, pandas, Polars)"
 readme = "README.md"
 license = {text = "MIT"}
-authors = [{name = "Stanislav Chernov", email = "bintocher@gmail.com"}]
+authors = [{name = "Stanislav Chernov", email = "bintocher@yandex.com"}]
 requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Topic :: Database",
 ]
-keywords = ["qvd", "qlik", "parquet", "arrow", "etl", "data-engineering"]
+keywords = ["qvd", "qlik", "parquet", "arrow", "datafusion", "pandas", "polars"]
 
 [project.urls]
 Homepage = "https://github.com/bintocher/qvdrs"

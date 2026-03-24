@@ -10,9 +10,12 @@
 //!   Requires feature `parquet_support`.
 //! - **Arrow RecordBatch** — convert QVD to/from Arrow for DataFusion, DuckDB, Polars integration.
 //!   Requires feature `parquet_support`.
+//! - **DataFusion SQL** — register QVD as a table, query with SQL.
+//!   Requires feature `datafusion_support`.
 //! - **Streaming reader** — read QVD in chunks without loading entire file into memory
 //! - **EXISTS() index** — O(1) hash lookup, like Qlik's `EXISTS()` function
-//! - **Zero dependencies** for core read/write (Parquet/Arrow are optional)
+//! - **Python bindings** — PyArrow, pandas, Polars via zero-copy Arrow bridge
+//! - **Zero dependencies** for core read/write (Parquet/Arrow/DataFusion are optional)
 //!
 //! ## Quick Start
 //!
@@ -75,14 +78,31 @@
 //! // Use with DataFusion, DuckDB, Polars...
 //! ```
 //!
+//! ### DataFusion SQL (feature `datafusion_support`)
+//!
+//! ```ignore
+//! use datafusion::prelude::*;
+//! use qvd::register_qvd;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let ctx = SessionContext::new();
+//!     register_qvd(&ctx, "sales", "sales.qvd")?;
+//!     let df = ctx.sql("SELECT Region, SUM(Amount) FROM sales GROUP BY Region").await?;
+//!     df.show().await?;
+//!     Ok(())
+//! }
+//! ```
+//!
 //! ## Feature Flags
 //!
 //! | Feature | Dependencies | Description |
 //! |---------|-------------|-------------|
 //! | *(default)* | none | Core QVD read/write, streaming, EXISTS |
 //! | `parquet_support` | arrow, parquet, chrono | Parquet/Arrow ↔ QVD conversion |
+//! | `datafusion_support` | + datafusion, tokio | SQL queries on QVD via DataFusion |
 //! | `cli` | + clap | CLI binary `qvd-cli` |
-//! | `python` | + pyo3 | Python bindings via PyO3 |
+//! | `python` | + pyo3, arrow/pyarrow | Python bindings with PyArrow/pandas/Polars |
 
 /// Error types for QVD operations.
 pub mod error;
@@ -108,6 +128,10 @@ pub mod streaming;
 #[cfg(any(feature = "parquet_support", feature = "python"))]
 pub mod parquet;
 
+/// DataFusion integration — SQL queries on QVD files (requires feature `datafusion_support`).
+#[cfg(feature = "datafusion_support")]
+pub mod datafusion;
+
 #[cfg(feature = "python")]
 #[doc(hidden)]
 pub mod python;
@@ -128,3 +152,6 @@ pub use parquet::{
     parquet_to_qvd, qvd_to_parquet,
     ParquetCompression,
 };
+
+#[cfg(feature = "datafusion_support")]
+pub use crate::datafusion::{QvdTableProvider, register_qvd};
