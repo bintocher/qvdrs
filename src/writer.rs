@@ -11,7 +11,7 @@ use crate::symbol::write_symbols;
 /// If the table was read from a file (has raw_xml and raw_binary),
 /// writes back the original raw bytes for perfect roundtrip fidelity.
 pub fn write_qvd<W: Write>(table: &QvdTable, mut writer: W) -> QvdResult<()> {
-    if !table.raw_xml.is_empty() && !table.raw_binary.is_empty() {
+    if !table.raw_xml.is_empty() {
         // Byte-identical roundtrip: write original raw bytes
         writer.write_all(&table.raw_xml)?;
         writer.write_all(&table.raw_binary)?;

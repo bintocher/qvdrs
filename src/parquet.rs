@@ -733,10 +733,10 @@ pub fn qvd_to_record_batch(table: &QvdTable) -> QvdResult<RecordBatch> {
         let symbols = &table.symbols[col_idx];
         let indices = &table.row_indices[col_idx];
         let num_symbols = symbols.len();
-        let has_null = indices.iter().any(|&i| i < 0 || i as usize >= num_symbols);
         let arrow_type = infer_arrow_type(qvd_field, symbols);
 
-        fields.push(Field::new(&qvd_field.field_name, arrow_type.clone(), has_null));
+        // Always nullable: NULLs can arise from index-based nulls OR type conversion failures
+        fields.push(Field::new(&qvd_field.field_name, arrow_type.clone(), true));
 
         // Helper: resolve index to symbol, returning None for NULL or out-of-bounds
         let resolve = |idx: i64| -> Option<&QvdSymbol> {

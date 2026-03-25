@@ -34,7 +34,7 @@ pub struct QvdFieldHeader {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct NumberFormat {
     pub format_type: String,
     pub n_dec: i32,
@@ -42,6 +42,19 @@ pub struct NumberFormat {
     pub fmt: String,
     pub dec: String,
     pub thou: String,
+}
+
+impl Default for NumberFormat {
+    fn default() -> Self {
+        NumberFormat {
+            format_type: "UNKNOWN".to_string(),
+            n_dec: 0,
+            use_thou: 0,
+            fmt: String::new(),
+            dec: String::new(),
+            thou: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +272,7 @@ pub fn write_xml_header(header: &QvdTableHeader) -> String {
     }
 
     write_tag(&mut xml, 3, "Comment", &header.comment);
+    write_tag(&mut xml, 3, "EncryptionInfo", "");
     xml.push_str(" </QvdTableHeader>\r\n");
     xml
 }
@@ -295,10 +309,7 @@ fn write_field_header(xml: &mut String, field: &QvdFieldHeader) {
     write_tag(xml, 7, "NoOfSymbols", &field.no_of_symbols.to_string());
     write_tag(xml, 7, "Offset", &field.offset.to_string());
     write_tag(xml, 7, "Length", &field.length.to_string());
-
-    if !field.comment.is_empty() {
-        write_tag(xml, 7, "Comment", &field.comment);
-    }
+    write_tag(xml, 7, "Comment", &field.comment);
 
     if !field.tags.is_empty() {
         xml.push_str("       <Tags>\r\n");
