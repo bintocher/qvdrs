@@ -1,9 +1,15 @@
 /// Tests: regeneration comparison and conversion roundtrips.
+/// These tests require local QVD files in qvd_input/ (excluded from git).
 use std::io::Cursor;
 use md5;
 
+fn has_test_files() -> bool {
+    std::path::Path::new("qvd_input/test_qvd.qvd").exists()
+}
+
 #[test]
 fn compare_regenerated_with_original() {
+    if !has_test_files() { println!("SKIP: qvd_input/ not found"); return; }
     let original_bytes = std::fs::read("qvd_input/test_qvd.qvd").unwrap();
     let null_pos = original_bytes.iter().position(|&b| b == 0).unwrap();
     let original_xml = std::str::from_utf8(&original_bytes[..null_pos]).unwrap();
@@ -56,7 +62,7 @@ fn compare_regenerated_with_original() {
 
 #[test]
 fn double_roundtrip_regenerated() {
-    // input → read → regenerate → write → read → regenerate → write → compare
+    if !has_test_files() { println!("SKIP: qvd_input/ not found"); return; }
     let original_bytes = std::fs::read("qvd_input/test_qvd.qvd").unwrap();
 
     let mut table1 = qvd::read_qvd(Cursor::new(&original_bytes)).unwrap();
@@ -96,6 +102,7 @@ fn double_roundtrip_regenerated() {
 #[cfg(feature = "parquet_support")]
 #[test]
 fn conversion_roundtrip_qvd_parquet_qvd_parquet_qvd() {
+    if !has_test_files() { println!("SKIP: qvd_input/ not found"); return; }
     use std::fs;
 
     let input_qvd = "qvd_input/test_qvd.qvd";
@@ -228,6 +235,7 @@ fn builder_generates_valid_xml() {
 /// Test MD5: raw roundtrip (read→write with raw bytes) must produce byte-identical files
 #[test]
 fn md5_raw_roundtrip() {
+    if !has_test_files() { println!("SKIP: qvd_input/ not found"); return; }
     let qvd_dir = "qvd_input";
     let mut tested = 0;
     let mut failed = Vec::new();
@@ -270,6 +278,7 @@ fn md5_raw_roundtrip() {
 /// Batch test: read all small QVD files, regenerate, verify binary data unchanged
 #[test]
 fn batch_regenerate_all_small_files() {
+    if !has_test_files() { println!("SKIP: qvd_input/ not found"); return; }
     let qvd_dir = "qvd_input";
     let mut tested = 0;
     let mut failed = Vec::new();

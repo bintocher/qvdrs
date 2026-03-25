@@ -10,6 +10,10 @@
 #[cfg(feature = "parquet_support")]
 #[test]
 fn convert_all_input_to_output() {
+    if !std::path::Path::new("qvd_input").exists() {
+        println!("SKIP: qvd_input/ not found");
+        return;
+    }
     let input_dir = "qvd_input";
     let output_dir = "C:/work/qlik/80_coding/qvdrs/qvd_output";
     let temp_dir = "C:/work/qlik/80_coding/qvdrs/qvd_output/_temp";
