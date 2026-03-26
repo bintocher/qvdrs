@@ -218,6 +218,35 @@ impl PyQvdTable {
         Ok(df)
     }
 
+    /// Filter rows where column matches any of the given values.
+    /// Returns a new QvdTable with only matching rows.
+    ///
+    /// ```python
+    /// filtered = table.filter_by_values("%Action_ID", ["7", "9"])
+    /// ```
+    fn filter_by_values(&self, col_name: &str, values: Vec<String>) -> PyResult<PyQvdTable> {
+        let refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+        let matching = self.inner.filter_by_values(col_name, &refs);
+        if matching.is_empty() {
+            // Return empty table with same structure
+            let filtered = self.inner.subset_rows(&[]);
+            return Ok(PyQvdTable { inner: filtered });
+        }
+        let filtered = self.inner.subset_rows(&matching);
+        Ok(PyQvdTable { inner: filtered })
+    }
+
+    /// Create a new QvdTable from a subset of row indices.
+    ///
+    /// ```python
+    /// rows = qvd.filter_exists(table, "ClientID", idx)
+    /// subset = table.subset_rows(rows)
+    /// ```
+    fn subset_rows(&self, row_indices: Vec<usize>) -> PyResult<PyQvdTable> {
+        let filtered = self.inner.subset_rows(&row_indices);
+        Ok(PyQvdTable { inner: filtered })
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "QvdTable(table='{}', rows={}, cols={})",
@@ -242,6 +271,10 @@ pub struct PyExistsIndex {
 #[pymethods]
 impl PyExistsIndex {
     /// Build an ExistsIndex from a QvdTable column.
+    ///
+    /// ```python
+    /// idx = qvd.ExistsIndex(table, "ClientID")
+    /// ```
     #[new]
     fn new(table: &PyQvdTable, col_name: &str) -> PyResult<Self> {
         let col = table.inner.header.fields.iter()
@@ -256,6 +289,20 @@ impl PyExistsIndex {
             values,
             col_name: col_name.to_string(),
         })
+    }
+
+    /// Build an ExistsIndex from an explicit list of values.
+    ///
+    /// ```python
+    /// idx = qvd.ExistsIndex.from_values(["7", "9"])
+    /// ```
+    #[staticmethod]
+    fn from_values(values: Vec<String>) -> Self {
+        let set: HashSet<String> = values.into_iter().collect();
+        PyExistsIndex {
+            values: set,
+            col_name: "<values>".to_string(),
+        }
     }
 
     /// Check if a value exists. O(1) hash lookup.
@@ -358,6 +405,36 @@ fn convert_qvd_to_parquet(qvd_path: &str, parquet_path: &str, compression: Optio
         .map_err(|e| PyValueError::new_err(format!("{}", e)))
 }
 
+/// Read a QVD file with streaming EXISTS() filter and optional column selection.
+/// Only matching rows are loaded into memory — much faster and lighter for large files.
+///
+/// ```python
+/// idx = qvd.ExistsIndex.from_values(["7", "9"])
+/// table = qvd.read_qvd_filtered("large.qvd", "%Action_ID", idx,
+///                                 select=["%Client_ID", "Date_BK", "%Action_ID"])
+/// table.save("filtered.qvd")
+/// ```
+#[pyfunction]
+#[pyo3(signature = (path, filter_col, index, select=None, chunk_size=None))]
+fn read_qvd_filtered(
+    path: &str,
+    filter_col: &str,
+    index: &PyExistsIndex,
+    select: Option<Vec<String>>,
+    chunk_size: Option<usize>,
+) -> PyResult<PyQvdTable> {
+    let rust_index = crate::exists::ExistsIndex::from_values(
+        &index.values.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+    );
+    let mut stream = crate::streaming::open_qvd_stream(path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let select_refs: Option<Vec<&str>> = select.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+    let chunk = chunk_size.unwrap_or(65536);
+    let table = stream.read_filtered(filter_col, &rust_index, select_refs.as_deref(), chunk)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    Ok(PyQvdTable { inner: table })
+}
+
 /// Python module definition.
 #[pymodule]
 fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -370,5 +447,6 @@ fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_qvd_to_arrow, m)?)?;
     m.add_function(wrap_pyfunction!(read_qvd_to_pandas, m)?)?;
     m.add_function(wrap_pyfunction!(read_qvd_to_polars, m)?)?;
+    m.add_function(wrap_pyfunction!(read_qvd_filtered, m)?)?;
     Ok(())
 }
