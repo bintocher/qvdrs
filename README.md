@@ -36,15 +36,6 @@ Selected benchmarks:
 | sample_xlarge.qvd | 1.7 GB | 87,617,047 | 8 | 23.6s | 1.6s |
 | sample_huge.qvd | 2.8 GB | 11,907,648 | 42 | 24.3s | 2.4s |
 
-### vs PyQvd (Pure Python)
-
-| File | PyQvd | qvd (Rust) | Speedup |
-|------|-------|------------|---------|
-| 10 MB, 1.4M rows | 5.0s | 0.17s | **29x** |
-| 41 MB, 466K rows | 8.5s | 0.5s | **16x** |
-| 480 MB, 12M rows | 79.4s | 2.3s | **35x** |
-| 1.7 GB, 87M rows | >10 min | 29.6s | **>20x** |
-
 ### Streaming EXISTS() filter — vs Qlik Sense
 
 Filtered read with `EXISTS()` + column selection — **2.5x faster than Qlik Sense**.
