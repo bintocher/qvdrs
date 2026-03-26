@@ -18,7 +18,7 @@ High-performance Rust library for reading, writing and converting Qlik QVD files
 - **Streaming reader** — read QVD files in chunks without loading everything into memory
 - **EXISTS() index** — O(1) hash lookup, like Qlik's `EXISTS()` function. Streaming filtered reads — 2.5x faster than Qlik Sense
 - **CLI tool** — `qvd-cli convert`, `inspect`, `head`, `schema`, `filter`
-- **Python bindings** — PyArrow, pandas, Polars support via zero-copy Arrow bridge. 20-35x faster than PyQvd
+- **Python bindings** — PyArrow, pandas, Polars support via zero-copy Arrow bridge
 - **Zero dependencies** for core QVD read/write (Parquet/Arrow/DataFusion/Python are optional features)
 
 ## Performance
@@ -83,21 +83,31 @@ qvd-cli filter large_table.qvd result.qvd \
 ```toml
 # Core QVD read/write (zero dependencies)
 [dependencies]
-qvd = "0.4"
+qvd = "0.4.2"
 
 # With Parquet/Arrow support
 [dependencies]
-qvd = { version = "0.4", features = ["parquet_support"] }
+qvd = { version = "0.4.2", features = ["parquet_support"] }
 
 # With DataFusion SQL support
 [dependencies]
-qvd = { version = "0.4", features = ["datafusion_support"] }
+qvd = { version = "0.4.2", features = ["datafusion_support"] }
 ```
 
 ### CLI
 
+Install with cargo:
+
 ```bash
 cargo install qvd --features cli
+```
+
+Or run without installing using uvx (requires Python and the `qvdrs` package):
+
+```bash
+uvx --from qvdrs qvd-cli inspect data.qvd
+uvx --from qvdrs qvd-cli convert input.qvd output.parquet
+uvx --from qvdrs qvd-cli filter large.qvd output.qvd --column %Type_ID --values 7,9
 ```
 
 ### Python
@@ -394,10 +404,16 @@ result = duckdb.sql("""
 
 ## CLI
 
-Install:
+Install with cargo:
 
 ```bash
 cargo install qvd --features cli
+```
+
+Or run directly via uvx (no install needed):
+
+```bash
+uvx --from qvdrs qvd-cli <command> [args]
 ```
 
 ### Convert between formats
@@ -505,7 +521,7 @@ src/
 ├── reader.rs       — high-level QVD reader
 ├── writer.rs       — high-level QVD writer + QvdTableBuilder
 ├── exists.rs       — ExistsIndex with HashSet + filter functions
-├── streaming.rs    — streaming chunk-based QVD reader
+├── streaming.rs    — streaming chunk-based QVD reader with filtered reads
 ├── parquet.rs      — Parquet/Arrow ↔ QVD conversion (optional)
 ├── datafusion.rs   — DataFusion TableProvider for SQL on QVD (optional)
 ├── python.rs       — PyO3 bindings with PyArrow/pandas/Polars (optional)
