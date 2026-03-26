@@ -39,6 +39,26 @@ enum Commands {
         /// QVD file path
         path: String,
     },
+    /// Filter QVD rows by column value(s) and save to QVD or Parquet.
+    /// Uses streaming — only matching rows are loaded into memory.
+    Filter {
+        /// Input QVD file path
+        input: String,
+        /// Output file path (QVD or Parquet)
+        output: String,
+        /// Column name to filter on
+        #[arg(long)]
+        column: String,
+        /// Values to match (comma-separated, e.g. "7,9")
+        #[arg(long)]
+        values: String,
+        /// Select only these columns (comma-separated). If omitted, all columns are included.
+        #[arg(long)]
+        select: Option<String>,
+        /// Compression for Parquet output: none, snappy, gzip, lz4, zstd
+        #[arg(short, long, default_value = "snappy")]
+        compression: String,
+    },
 }
 
 fn main() {
@@ -56,6 +76,9 @@ fn main() {
         }
         Commands::Schema { path } => {
             cmd_schema(&path);
+        }
+        Commands::Filter { input, output, column, values, select, compression } => {
+            cmd_filter(&input, &output, &column, &values, select.as_deref(), &compression);
         }
     }
 }
@@ -241,6 +264,81 @@ fn cmd_schema(path: &str) {
     for field in batch.schema().fields() {
         println!("  {:<30} {:?}{}", field.name(), field.data_type(),
             if field.is_nullable() { " (nullable)" } else { "" });
+    }
+}
+
+fn cmd_filter(input: &str, output: &str, column: &str, values: &str, select: Option<&str>, compression: &str) {
+    let start = Instant::now();
+    let filter_values: Vec<&str> = values.split(',').map(|s| s.trim()).collect();
+    let select_cols: Option<Vec<&str>> = select.map(|s| s.split(',').map(|c| c.trim()).collect());
+
+    println!("Filter: {} WHERE {} IN [{}]", input, column, values);
+    if let Some(ref cols) = select_cols {
+        println!("  Select: {}", cols.join(", "));
+    }
+    println!("  Output: {}", output);
+
+    // Build ExistsIndex from filter values
+    let index = qvd::ExistsIndex::from_values(&filter_values);
+
+    // Open streaming reader — loads only symbol tables, not the full index table
+    let mut stream = match qvd::open_qvd_stream(input) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error opening QVD: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let total_rows = stream.total_rows();
+    let total_cols = stream.header.fields.len();
+    println!("  Source: {} rows x {} cols", format_number(total_rows), total_cols);
+
+    // Stream + filter: only matching rows loaded into memory
+    let select_refs: Option<Vec<&str>> = select_cols.as_ref().map(|v| v.iter().copied().collect());
+    let filtered = match stream.read_filtered(column, &index, select_refs.as_deref(), 65536) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error filtering: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let filter_elapsed = start.elapsed();
+    println!("  Filtered: {} rows ({:.1}%) in {:.1}s",
+        format_number(filtered.num_rows()),
+        filtered.num_rows() as f64 / total_rows as f64 * 100.0,
+        filter_elapsed.as_secs_f64());
+
+    if filtered.num_rows() == 0 {
+        eprintln!("Warning: no matching rows found");
+        return;
+    }
+
+    let output_lower = output.to_lowercase();
+    let result = if output_lower.ends_with(".parquet") {
+        let comp = match ParquetCompression::parse(compression) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        };
+        qvd::write_qvd_table_to_parquet(&filtered, output, comp)
+    } else {
+        qvd::write_qvd_file(&filtered, output)
+    };
+
+    match result {
+        Ok(()) => {
+            let elapsed = start.elapsed();
+            let out_size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+            println!("  Done in {:.1}s, output: {} ({} rows x {} cols)",
+                elapsed.as_secs_f64(), format_size(out_size),
+                format_number(filtered.num_rows()), filtered.num_cols());
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
     }
 }
 

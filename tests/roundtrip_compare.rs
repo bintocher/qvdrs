@@ -275,6 +275,108 @@ fn md5_raw_roundtrip() {
     assert!(failed.is_empty(), "MD5 mismatch in raw roundtrip");
 }
 
+/// Test EXISTS-based filtering + subset_rows + write QVD
+#[test]
+fn exists_filter_subset_write() {
+    if !has_test_files() { println!("SKIP: qvd_input/ not found"); return; }
+
+    let table = qvd::read_qvd_file("qvd_input/test_qvd.qvd").unwrap();
+    println!("Original: {} rows x {} cols", table.num_rows(), table.num_cols());
+
+    // Build ExistsIndex from explicit values (simulating a lookup table)
+    let index = qvd::ExistsIndex::from_values(&["Q1", "Q3"]);
+
+    // Filter using exists_fast
+    let col_idx = table.column_index("TEST.Quarter").unwrap();
+    let matching = qvd::filter_rows_by_exists_fast(&table, col_idx, &index);
+    println!("Matched rows: {}", matching.len());
+    assert_eq!(matching.len(), 6); // Q1=3 rows + Q3=3 rows
+
+    // Create subset
+    let filtered = table.subset_rows(&matching);
+    assert_eq!(filtered.num_rows(), 6);
+    assert_eq!(filtered.num_cols(), table.num_cols());
+
+    // Write to QVD
+    let out_path = "qvd_output/_test_exists_filter.qvd";
+    qvd::write_qvd_file(&filtered, out_path).unwrap();
+
+    // Read back and verify
+    let readback = qvd::read_qvd_file(out_path).unwrap();
+    assert_eq!(readback.num_rows(), 6);
+    assert_eq!(readback.num_cols(), table.num_cols());
+
+    // Verify all rows have Quarter = Q1 or Q3
+    for row in 0..readback.num_rows() {
+        let quarter = readback.get_by_name(row, "TEST.Quarter").unwrap().as_string().unwrap();
+        assert!(quarter == "Q1" || quarter == "Q3",
+            "Row {} has quarter={}, expected Q1 or Q3", row, quarter);
+    }
+
+    // Verify data matches original filtered rows
+    for (new_row, &orig_row) in matching.iter().enumerate() {
+        for col in 0..table.num_cols() {
+            let orig = table.get(orig_row, col).as_string();
+            let got = readback.get(new_row, col).as_string();
+            assert_eq!(orig, got, "Mismatch at new_row={} orig_row={} col={}", new_row, orig_row, col);
+        }
+    }
+
+    let _ = std::fs::remove_file(out_path);
+    println!("PASS: EXISTS filter → subset_rows → write QVD → readback verified");
+}
+
+/// Test streaming read_filtered: opens QVD as stream, filters by EXISTS, selects columns
+#[test]
+fn streaming_read_filtered() {
+    if !has_test_files() { println!("SKIP: qvd_input/ not found"); return; }
+
+    let index = qvd::ExistsIndex::from_values(&["Q1", "Q3"]);
+    let mut stream = qvd::open_qvd_stream("qvd_input/test_qvd.qvd").unwrap();
+    assert_eq!(stream.total_rows(), 12);
+
+    // Filter + select 2 columns
+    let filtered = stream.read_filtered(
+        "TEST.Quarter",
+        &index,
+        Some(&["TEST.Month", "TEST.Quarter"]),
+        4, // small chunk size to test chunking
+    ).unwrap();
+
+    assert_eq!(filtered.num_rows(), 6);
+    assert_eq!(filtered.num_cols(), 2);
+    assert_eq!(filtered.column_names(), vec!["TEST.Month", "TEST.Quarter"]);
+
+    // Verify all rows have Quarter = Q1 or Q3
+    for row in 0..filtered.num_rows() {
+        let quarter = filtered.get_by_name(row, "TEST.Quarter").unwrap().as_string().unwrap();
+        assert!(quarter == "Q1" || quarter == "Q3",
+            "Row {} has quarter={}", row, quarter);
+    }
+
+    // Verify months: Q1 has months 1,2,3; Q3 has 7,8,9
+    let months: Vec<String> = (0..filtered.num_rows())
+        .map(|r| filtered.get_by_name(r, "TEST.Month").unwrap().as_string().unwrap())
+        .collect();
+    assert_eq!(months, vec!["1", "2", "3", "7", "8", "9"]);
+
+    // Test with select_cols=None (all columns)
+    let mut stream2 = qvd::open_qvd_stream("qvd_input/test_qvd.qvd").unwrap();
+    let filtered_all = stream2.read_filtered("TEST.Quarter", &index, None, 65536).unwrap();
+    assert_eq!(filtered_all.num_rows(), 6);
+    assert_eq!(filtered_all.num_cols(), 4);
+
+    // Write to QVD and read back
+    let out = "qvd_output/_test_streaming_filtered.qvd";
+    qvd::write_qvd_file(&filtered, out).unwrap();
+    let readback = qvd::read_qvd_file(out).unwrap();
+    assert_eq!(readback.num_rows(), 6);
+    assert_eq!(readback.num_cols(), 2);
+    let _ = std::fs::remove_file(out);
+
+    println!("PASS: streaming read_filtered with column selection verified");
+}
+
 /// Batch test: read all small QVD files, regenerate, verify binary data unchanged
 #[test]
 fn batch_regenerate_all_small_files() {

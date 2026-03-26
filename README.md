@@ -16,8 +16,8 @@ High-performance Rust library for reading, writing and converting Qlik QVD files
 - **DataFusion SQL** — register QVD files as tables and query them with SQL
 - **DuckDB integration** — use QVD data in DuckDB via Arrow bridge (Rust and Python)
 - **Streaming reader** — read QVD files in chunks without loading everything into memory
-- **EXISTS() index** — O(1) hash lookup, like Qlik's `EXISTS()` function
-- **CLI tool** — `qvd-cli convert`, `inspect`, `head`, `schema`
+- **EXISTS() index** — O(1) hash lookup, like Qlik's `EXISTS()` function. Streaming filtered reads — 2.5x faster than Qlik Sense
+- **CLI tool** — `qvd-cli convert`, `inspect`, `head`, `schema`, `filter`
 - **Python bindings** — PyArrow, pandas, Polars support via zero-copy Arrow bridge. 20-35x faster than PyQvd
 - **Zero dependencies** for core QVD read/write (Parquet/Arrow/DataFusion/Python are optional features)
 
@@ -45,6 +45,24 @@ All 20 files — **byte-identical roundtrip** (MD5 match).
 | 480 MB, 12M rows | 79.4s | 2.3s | **35x** |
 | 1.7 GB, 87M rows | >10 min | 29.6s | **>20x** |
 
+### Streaming EXISTS() filter — vs Qlik Sense
+
+Filtered read with `EXISTS()` + column selection — **2.5x faster than Qlik Sense**.
+
+The streaming reader loads only symbol tables (small, unique values) into memory, then scans the index table in chunks. For each row, only the filter column is decoded first. If the row matches, the selected columns are decoded. Non-matching rows are skipped entirely — no memory allocated.
+
+**Benchmark: 1.7 GB QVD, 87.6M rows → filter by 2 values, select 3 of 8 columns → 20.4M rows output**
+
+| | Qlik Sense | qvdrs (streaming) |
+|---|---|---|
+| **Task** | `LOAD %Key_ID, DateField_BK, %Type_ID FROM large_table.qvd (qvd) WHERE %Type_ID=7 OR %Type_ID=9; STORE INTO result.qvd;` | `qvd-cli filter --column %Type_ID --values 7,9 --select %Key_ID,DateField_BK,%Type_ID` |
+| **Read + filter** | ~28s | **7.1s** |
+| **Total (→ QVD)** | **~28s** | **11.4s** |
+| **Total (→ Parquet)** | — | **15.5s** |
+| **Speedup** | 1× | **2.5×** (QVD) / **1.8×** (Parquet) |
+
+> **Recommendation:** For large QVD files, always use `read_filtered()` (or `qvd-cli filter`) instead of loading the full file and filtering afterwards. The streaming approach uses dramatically less memory (only matched rows are held) and is significantly faster because non-matching rows are never fully decoded.
+
 ## Installation
 
 ### Rust
@@ -52,15 +70,15 @@ All 20 files — **byte-identical roundtrip** (MD5 match).
 ```toml
 # Core QVD read/write (zero dependencies)
 [dependencies]
-qvd = "0.2"
+qvd = "0.4"
 
 # With Parquet/Arrow support
 [dependencies]
-qvd = { version = "0.2", features = ["parquet_support"] }
+qvd = { version = "0.4", features = ["parquet_support"] }
 
 # With DataFusion SQL support
 [dependencies]
-qvd = { version = "0.2", features = ["datafusion_support"] }
+qvd = { version = "0.4", features = ["datafusion_support"] }
 ```
 
 ### CLI
@@ -190,7 +208,7 @@ Like Qlik's `EXISTS()` function — build an index of unique values from one tab
 and use it to check or filter another table in O(1) per row.
 
 ```rust
-use qvd::{read_qvd_file, ExistsIndex, filter_rows_by_exists, filter_rows_by_exists_fast};
+use qvd::{read_qvd_file, ExistsIndex, filter_rows_by_exists_fast};
 
 // Build index from the "clients" table
 let clients = read_qvd_file("clients.qvd")?;
@@ -202,20 +220,47 @@ println!("Unique clients: {}", index.len());
 
 // Filter another table — get row indices where ClientID exists in the clients table
 let facts = read_qvd_file("facts.qvd")?;
-
-// By column name (convenient)
-let matching_rows = filter_rows_by_exists(&facts, "ClientID", &index);
-println!("Matching rows: {}", matching_rows.len());
-
-// By column index (faster for large tables — pre-computes symbol matches)
 let col_idx = 0; // index of "ClientID" column in facts table
 let matching_rows = filter_rows_by_exists_fast(&facts, col_idx, &index);
+println!("Matching rows: {}", matching_rows.len());
+```
 
-// Access the filtered rows
-for &row in &matching_rows {
-    let client_id = facts.get(row, col_idx).as_string().unwrap_or_default();
-    println!("Row {}: ClientID = {}", row, client_id);
-}
+### Streaming EXISTS() — Filtered Read (recommended for large files)
+
+For large QVD files, use streaming `read_filtered()` instead of loading everything into memory.
+Only matching rows are loaded — **2.5x faster than Qlik Sense**, uses dramatically less memory.
+
+```rust
+use qvd::{open_qvd_stream, ExistsIndex, write_qvd_file};
+
+// 1. Build EXISTS index — from another table or from explicit values
+let index = ExistsIndex::from_values(&["7", "9"]);
+
+// 2. Open streaming reader (loads only symbol tables, not the full index table)
+let mut stream = open_qvd_stream("large_table.qvd")?;
+
+// 3. Stream + filter + select columns — only matching rows loaded into memory
+let filtered = stream.read_filtered(
+    "%Type_ID",                                     // filter column
+    &index,                                         // EXISTS index
+    Some(&["%Key_ID", "DateField_BK", "%Type_ID"]), // select columns (None = all)
+    65536,                                          // chunk size
+)?;
+println!("Matched: {} rows x {} cols", filtered.num_rows(), filtered.num_cols());
+
+// 4. Save result
+write_qvd_file(&filtered, "output.qvd")?;
+```
+
+You can also build an EXISTS index from another QVD table's column:
+
+```rust
+let clients = read_qvd_file("clients.qvd")?;
+let index = ExistsIndex::from_column(&clients, "ClientID").unwrap();
+drop(clients); // free memory before opening the large file
+
+let mut stream = open_qvd_stream("transactions.qvd")?;
+let filtered = stream.read_filtered("ClientID", &index, None, 65536)?;
 ```
 
 ## Quick Start — Python
@@ -399,6 +444,21 @@ qvd-cli head data.qvd
 
 # Show first 50 rows
 qvd-cli head data.qvd --rows 50
+```
+
+### Filter rows with EXISTS() (streaming)
+
+```bash
+# Filter by column value(s) — streaming, memory-efficient
+qvd-cli filter large.qvd output.qvd --column %Type_ID --values 7,9
+
+# Filter + select only specific columns
+qvd-cli filter large.qvd output.qvd --column %Type_ID --values 7,9 \
+    --select "%Key_ID,DateField_BK,%Type_ID"
+
+# Filter and save as Parquet
+qvd-cli filter large.qvd output.parquet --column %Type_ID --values 7,9 \
+    --select "%Key_ID,DateField_BK,%Type_ID" --compression zstd
 ```
 
 ### Show Arrow schema

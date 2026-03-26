@@ -45,6 +45,12 @@ impl ExistsIndex {
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
+
+    /// Build an EXISTS index from an explicit list of string values.
+    pub fn from_values(values: &[&str]) -> Self {
+        let set: HashSet<String> = values.iter().map(|s| s.to_string()).collect();
+        ExistsIndex { values: set }
+    }
 }
 
 /// Filter rows from a QVD table where a field's value exists in the given ExistsIndex.
