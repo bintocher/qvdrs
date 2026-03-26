@@ -435,6 +435,145 @@ fn read_qvd_filtered(
     Ok(PyQvdTable { inner: table })
 }
 
+/// Register a QVD file as a DuckDB table. One call — then query with SQL.
+///
+/// ```python
+/// import qvd, duckdb
+/// conn = duckdb.connect()
+/// qvd.register_duckdb(conn, "sales", "sales.qvd")
+/// conn.sql("SELECT * FROM sales WHERE amount > 100").show()
+/// ```
+#[pyfunction]
+fn register_duckdb<'py>(conn: &Bound<'py, PyAny>, table_name: &str, path: &str) -> PyResult<()> {
+    let py = conn.py();
+    let table = reader::read_qvd_file(path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let batch = crate::parquet::qvd_to_record_batch(&table)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let pyarrow_batch = batch.to_pyarrow(py)?;
+
+    // Convert RecordBatch to PyArrow Table (DuckDB prefers Table for register)
+    let pa = py.import("pyarrow")
+        .map_err(|_| PyImportError::new_err("pyarrow is required: pip install pyarrow"))?;
+    let pa_table_cls = pa.getattr("Table")?;
+    let arrow_table = pa_table_cls.call_method1("from_batches", (vec![pyarrow_batch],))?;
+
+    conn.call_method1("register", (table_name, arrow_table))?;
+    Ok(())
+}
+
+/// Register a QVD file as a DuckDB table with streaming EXISTS() filter.
+/// Only matching rows are loaded — memory-efficient for large files.
+///
+/// ```python
+/// import qvd, duckdb
+/// conn = duckdb.connect()
+/// idx = qvd.ExistsIndex.from_values(["7", "9"])
+/// qvd.register_duckdb_filtered(conn, "cal79", "large.qvd",
+///                               "%Action_ID", idx,
+///                               select=["%Client_ID", "Date_BK", "%Action_ID"])
+/// conn.sql("SELECT COUNT(*) FROM cal79").show()
+/// ```
+#[pyfunction]
+#[pyo3(signature = (conn, table_name, path, filter_col, index, select=None, chunk_size=None))]
+fn register_duckdb_filtered<'py>(
+    conn: &Bound<'py, PyAny>,
+    table_name: &str,
+    path: &str,
+    filter_col: &str,
+    index: &PyExistsIndex,
+    select: Option<Vec<String>>,
+    chunk_size: Option<usize>,
+) -> PyResult<()> {
+    let py = conn.py();
+    let rust_index = crate::exists::ExistsIndex::from_values(
+        &index.values.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+    );
+    let mut stream = crate::streaming::open_qvd_stream(path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let select_refs: Option<Vec<&str>> = select.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+    let chunk = chunk_size.unwrap_or(65536);
+    let qvd_table = stream.read_filtered(filter_col, &rust_index, select_refs.as_deref(), chunk)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+
+    let batch = crate::parquet::qvd_to_record_batch(&qvd_table)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let pyarrow_batch = batch.to_pyarrow(py)?;
+
+    let pa = py.import("pyarrow")
+        .map_err(|_| PyImportError::new_err("pyarrow is required: pip install pyarrow"))?;
+    let pa_table_cls = pa.getattr("Table")?;
+    let arrow_table = pa_table_cls.call_method1("from_batches", (vec![pyarrow_batch],))?;
+
+    conn.call_method1("register", (table_name, arrow_table))?;
+    Ok(())
+}
+
+/// Register all QVD files from a directory as DuckDB tables.
+/// Table names are derived from file names (without .qvd extension).
+///
+/// ```python
+/// import qvd, duckdb
+/// conn = duckdb.connect()
+/// tables = qvd.register_duckdb_folder(conn, "/path/to/qvd_files/")
+/// print(tables)  # ["sales", "customers", "orders"]
+/// conn.sql("SELECT * FROM sales JOIN customers ON ...").show()
+/// ```
+#[pyfunction]
+#[pyo3(signature = (conn, folder_path, pattern=None))]
+fn register_duckdb_folder<'py>(
+    conn: &Bound<'py, PyAny>,
+    folder_path: &str,
+    pattern: Option<&str>,
+) -> PyResult<Vec<String>> {
+    let py = conn.py();
+    let pa = py.import("pyarrow")
+        .map_err(|_| PyImportError::new_err("pyarrow is required: pip install pyarrow"))?;
+    let pa_table_cls = pa.getattr("Table")?;
+
+    let glob_pattern = pattern.unwrap_or("*.qvd");
+    let search_path = std::path::Path::new(folder_path);
+
+    let mut registered = Vec::new();
+
+    let entries: Vec<_> = std::fs::read_dir(search_path)
+        .map_err(|e| PyValueError::new_err(format!("Cannot read directory '{}': {}", folder_path, e)))?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            if glob_pattern == "*.qvd" {
+                name.ends_with(".qvd")
+            } else {
+                name.ends_with(".qvd")
+            }
+        })
+        .collect();
+
+    for entry in entries {
+        let path = entry.path();
+        let table_name = path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let path_str = path.to_str()
+            .ok_or_else(|| PyValueError::new_err("Invalid file path"))?;
+
+        let qvd_table = reader::read_qvd_file(path_str)
+            .map_err(|e| PyValueError::new_err(format!("Error reading '{}': {}", path_str, e)))?;
+        let batch = crate::parquet::qvd_to_record_batch(&qvd_table)
+            .map_err(|e| PyValueError::new_err(format!("Error converting '{}': {}", path_str, e)))?;
+        let pyarrow_batch = batch.to_pyarrow(py)?;
+        let arrow_table = pa_table_cls.call_method1("from_batches", (vec![pyarrow_batch],))?;
+
+        conn.call_method1("register", (&table_name, arrow_table))?;
+        registered.push(table_name);
+    }
+
+    registered.sort();
+    Ok(registered)
+}
+
 /// Python module definition.
 #[pymodule]
 fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -448,5 +587,8 @@ fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_qvd_to_pandas, m)?)?;
     m.add_function(wrap_pyfunction!(read_qvd_to_polars, m)?)?;
     m.add_function(wrap_pyfunction!(read_qvd_filtered, m)?)?;
+    m.add_function(wrap_pyfunction!(register_duckdb, m)?)?;
+    m.add_function(wrap_pyfunction!(register_duckdb_filtered, m)?)?;
+    m.add_function(wrap_pyfunction!(register_duckdb_folder, m)?)?;
     Ok(())
 }

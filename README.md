@@ -381,25 +381,43 @@ table = qvd.QvdTable.from_arrow(batch, table_name="my_table")
 table.save("output.qvd")
 ```
 
-### DuckDB (Python)
+### DuckDB (Python) — native QVD support
+
+Register QVD files as DuckDB tables with a single function call, then query with SQL:
 
 ```python
 import qvd
 import duckdb
 
-# QVD → DuckDB (via Arrow, zero-copy)
-batch = qvd.read_qvd_to_arrow("data.qvd")
-result = duckdb.sql("SELECT * FROM batch WHERE amount > 100")
+conn = duckdb.connect()
 
-# Or query multiple QVD files:
-sales = qvd.read_qvd_to_arrow("sales.qvd")
-customers = qvd.read_qvd_to_arrow("customers.qvd")
-result = duckdb.sql("""
+# Register a single QVD file as a DuckDB table
+qvd.register_duckdb(conn, "sales", "sales.qvd")
+conn.sql("SELECT Region, SUM(Amount) as total FROM sales GROUP BY Region").show()
+
+# Register all QVD files from a folder at once
+tables = qvd.register_duckdb_folder(conn, "/path/to/qvd_files/")
+print(tables)  # ["customers", "orders", "products", "sales", ...]
+
+# JOIN across multiple QVD tables
+conn.sql("""
     SELECT c.Name, SUM(s.Amount) as total
     FROM sales s
     JOIN customers c ON s.CustomerID = c.CustomerID
     GROUP BY c.Name
-""")
+    ORDER BY total DESC
+""").show()
+```
+
+Register with streaming EXISTS() filter for large files:
+
+```python
+# Only load matching rows — memory-efficient for huge QVDs
+idx = qvd.ExistsIndex.from_values(["7", "9"])
+qvd.register_duckdb_filtered(conn, "cal79", "large_table.qvd",
+                              "%Action_ID", idx,
+                              select=["%Client_ID", "Date_BK", "%Action_ID"])
+conn.sql("SELECT COUNT(*) FROM cal79").show()
 ```
 
 ## CLI
