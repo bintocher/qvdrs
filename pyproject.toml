@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "qvdrs"
-version = "0.4.3"
+version = "0.4.4"
 description = "High-performance Qlik QVD file reader/writer with Parquet/Arrow/DataFusion support — Rust-powered Python bindings (PyArrow, pandas, Polars)"
 readme = "README.md"
 license = {text = "MIT"}

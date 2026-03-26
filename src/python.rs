@@ -509,69 +509,195 @@ fn register_duckdb_filtered<'py>(
     Ok(())
 }
 
-/// Register all QVD files from a directory as DuckDB tables.
+/// Register QVD files from one or more directories as DuckDB tables.
 /// Table names are derived from file names (without .qvd extension).
+///
+/// Args:
+///   conn: DuckDB connection
+///   folder_paths: single path (str) or list of paths
+///   recursive: scan subdirectories (default: False)
+///   glob: file pattern to match (default: "*.qvd")
+///   max_file_size_mb: skip files larger than this (default: 500 MB)
+///
+/// Returns: list of registered table names
 ///
 /// ```python
 /// import qvd, duckdb
 /// conn = duckdb.connect()
+///
+/// # Single folder
 /// tables = qvd.register_duckdb_folder(conn, "/path/to/qvd_files/")
-/// print(tables)  # ["sales", "customers", "orders"]
+///
+/// # Multiple folders
+/// tables = qvd.register_duckdb_folder(conn, ["/data/sales/", "/data/crm/"])
+///
+/// # Recursive with pattern
+/// tables = qvd.register_duckdb_folder(conn, "/data/", recursive=True, glob="client_*.qvd")
+///
 /// conn.sql("SELECT * FROM sales JOIN customers ON ...").show()
 /// ```
 #[pyfunction]
-#[pyo3(signature = (conn, folder_path, pattern=None))]
+#[pyo3(signature = (conn, folder_paths, recursive=None, glob=None, max_file_size_mb=None))]
 fn register_duckdb_folder<'py>(
     conn: &Bound<'py, PyAny>,
-    folder_path: &str,
-    pattern: Option<&str>,
+    folder_paths: &Bound<'py, PyAny>,
+    recursive: Option<bool>,
+    glob: Option<&str>,
+    max_file_size_mb: Option<u64>,
 ) -> PyResult<Vec<String>> {
     let py = conn.py();
     let pa = py.import("pyarrow")
         .map_err(|_| PyImportError::new_err("pyarrow is required: pip install pyarrow"))?;
     let pa_table_cls = pa.getattr("Table")?;
 
-    let glob_pattern = pattern.unwrap_or("*.qvd");
-    let search_path = std::path::Path::new(folder_path);
+    let recursive = recursive.unwrap_or(false);
+    let glob_pattern = glob.unwrap_or("*.qvd");
+    let max_size = max_file_size_mb.unwrap_or(500) * 1_048_576;
+
+    // Accept single string or list of strings
+    let paths: Vec<String> = if let Ok(s) = folder_paths.extract::<String>() {
+        vec![s]
+    } else if let Ok(list) = folder_paths.extract::<Vec<String>>() {
+        list
+    } else {
+        return Err(PyValueError::new_err("folder_paths must be a string or list of strings"));
+    };
 
     let mut registered = Vec::new();
+    let mut errors = Vec::new();
 
-    let entries: Vec<_> = std::fs::read_dir(search_path)
-        .map_err(|e| PyValueError::new_err(format!("Cannot read directory '{}': {}", folder_path, e)))?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let name = e.file_name().to_string_lossy().to_lowercase();
-            if glob_pattern == "*.qvd" {
-                name.ends_with(".qvd")
-            } else {
-                name.ends_with(".qvd")
-            }
-        })
-        .collect();
+    for folder in &paths {
+        collect_qvd_files(
+            std::path::Path::new(folder),
+            recursive,
+            glob_pattern,
+            max_size,
+            py,
+            conn,
+            &pa_table_cls,
+            &mut registered,
+            &mut errors,
+        )?;
+    }
 
-    for entry in entries {
+    if !errors.is_empty() {
+        let py_warnings = py.import("warnings")?;
+        for err in &errors {
+            py_warnings.call_method1("warn", (err.as_str(),))?;
+        }
+    }
+
+    registered.sort();
+    Ok(registered)
+}
+
+fn collect_qvd_files<'py>(
+    dir: &std::path::Path,
+    recursive: bool,
+    glob_pattern: &str,
+    max_size: u64,
+    py: Python<'py>,
+    conn: &Bound<'py, PyAny>,
+    pa_table_cls: &Bound<'py, PyAny>,
+    registered: &mut Vec<String>,
+    errors: &mut Vec<String>,
+) -> PyResult<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            errors.push(format!("Cannot read '{}': {}", dir.display(), e));
+            return Ok(());
+        }
+    };
+
+    for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
+
+        if path.is_dir() && recursive {
+            collect_qvd_files(&path, recursive, glob_pattern, max_size, py, conn, pa_table_cls, registered, errors)?;
+            continue;
+        }
+
+        if !path.is_file() { continue; }
+
+        let name_lower = path.file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if !name_lower.ends_with(".qvd") { continue; }
+
+        // Check glob pattern: supports "prefix*", "*suffix", "prefix*suffix", "*mid*"
+        if glob_pattern != "*.qvd" {
+            let pattern_lower = glob_pattern.to_lowercase();
+            // Strip .qvd from pattern if present — we match against the full filename
+            let matches = if let Some(star_pos) = pattern_lower.find('*') {
+                let prefix = &pattern_lower[..star_pos];
+                let suffix = &pattern_lower[star_pos + 1..];
+                if prefix.is_empty() && suffix.is_empty() {
+                    // Pattern is just "*"
+                    true
+                } else if prefix.is_empty() && suffix.starts_with('.') {
+                    // Pattern like "*.qvd"
+                    name_lower.ends_with(suffix)
+                } else if prefix.is_empty() {
+                    // Pattern like "*actions*" or "*actions*.qvd"
+                    // Remove trailing .qvd from suffix if present, then check contains
+                    let inner = suffix.strip_suffix(".qvd").or(suffix.strip_suffix('*')).unwrap_or(suffix);
+                    name_lower.contains(inner)
+                } else if suffix.is_empty() || suffix == ".qvd" {
+                    // Pattern like "prefix*.qvd" or "prefix*"
+                    name_lower.starts_with(prefix)
+                } else {
+                    // Pattern like "prefix*suffix"
+                    name_lower.starts_with(prefix) && name_lower.ends_with(suffix)
+                }
+            } else {
+                name_lower == pattern_lower
+            };
+            if !matches { continue; }
+        }
+
+        // Check file size
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        if size > max_size {
+            errors.push(format!("Skipped '{}': {} MB exceeds limit", path.display(), size / 1_048_576));
+            continue;
+        }
+
         let table_name = path.file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
             .to_string();
 
-        let path_str = path.to_str()
-            .ok_or_else(|| PyValueError::new_err("Invalid file path"))?;
+        let path_str = match path.to_str() {
+            Some(s) => s,
+            None => { errors.push(format!("Invalid path: {}", path.display())); continue; }
+        };
 
-        let qvd_table = reader::read_qvd_file(path_str)
-            .map_err(|e| PyValueError::new_err(format!("Error reading '{}': {}", path_str, e)))?;
-        let batch = crate::parquet::qvd_to_record_batch(&qvd_table)
-            .map_err(|e| PyValueError::new_err(format!("Error converting '{}': {}", path_str, e)))?;
-        let pyarrow_batch = batch.to_pyarrow(py)?;
-        let arrow_table = pa_table_cls.call_method1("from_batches", (vec![pyarrow_batch],))?;
+        // Read QVD → Arrow → register in DuckDB
+        let qvd_table = match reader::read_qvd_file(path_str) {
+            Ok(t) => t,
+            Err(e) => { errors.push(format!("{}: {}", table_name, e)); continue; }
+        };
+        let batch = match crate::parquet::qvd_to_record_batch(&qvd_table) {
+            Ok(b) => b,
+            Err(e) => { errors.push(format!("{}: {}", table_name, e)); continue; }
+        };
+        let pyarrow_batch = match batch.to_pyarrow(py) {
+            Ok(b) => b,
+            Err(e) => { errors.push(format!("{}: {}", table_name, e)); continue; }
+        };
+        let arrow_table = match pa_table_cls.call_method1("from_batches", (vec![pyarrow_batch],)) {
+            Ok(t) => t,
+            Err(e) => { errors.push(format!("{}: {}", table_name, e)); continue; }
+        };
 
-        conn.call_method1("register", (&table_name, arrow_table))?;
-        registered.push(table_name);
+        match conn.call_method1("register", (&table_name, arrow_table)) {
+            Ok(_) => registered.push(table_name),
+            Err(e) => errors.push(format!("{}: {}", table_name, e)),
+        }
     }
 
-    registered.sort();
-    Ok(registered)
+    Ok(())
 }
 
 /// Python module definition.

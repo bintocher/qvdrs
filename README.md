@@ -83,15 +83,15 @@ qvd-cli filter large_table.qvd result.qvd \
 ```toml
 # Core QVD read/write (zero dependencies)
 [dependencies]
-qvd = "0.4.3"
+qvd = "0.4.4"
 
 # With Parquet/Arrow support
 [dependencies]
-qvd = { version = "0.4.3", features = ["parquet_support"] }
+qvd = { version = "0.4.4", features = ["parquet_support"] }
 
 # With DataFusion SQL support
 [dependencies]
-qvd = { version = "0.4.3", features = ["datafusion_support"] }
+qvd = { version = "0.4.4", features = ["datafusion_support"] }
 ```
 
 ### CLI
