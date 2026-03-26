@@ -51,7 +51,7 @@ Filtered read with `EXISTS()` + column selection — **2.5x faster than Qlik Sen
 
 The streaming reader loads only symbol tables (small, unique values) into memory, then scans the index table in chunks. For each row, only the filter column is decoded first. If the row matches, the selected columns are decoded. Non-matching rows are skipped entirely — no memory allocated.
 
-**Benchmark: 1.7 GB QVD, 87.6M rows → filter by 2 values, select 3 of 8 columns → 20.4M rows output**
+**Benchmark: 1.7 GB QVD, 87.6M rows × 8 columns → filter by 2 values, select 3 columns → 20.4M rows × 3 columns output**
 
 Qlik Sense script:
 ```qlik
