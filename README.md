@@ -23,7 +23,9 @@ High-performance Rust library for reading, writing and converting Qlik QVD files
 
 ## Performance
 
-Tested on 20 real QVD files (11 KB to 2.8 GB):
+Tested on 399 real QVD files (11 KB to 2.8 GB) — all **byte-identical roundtrip** (MD5 match).
+
+Selected benchmarks:
 
 | File | Size | Rows | Columns | Read | Write |
 |------|------|------|---------|------|-------|
@@ -31,10 +33,8 @@ Tested on 20 real QVD files (11 KB to 2.8 GB):
 | sample_small.qvd | 418 KB | 2,746 | 8 | 0.0s | 0.0s |
 | sample_medium.qvd | 41 MB | 465,810 | 12 | 0.5s | 0.0s |
 | sample_large.qvd | 587 MB | 5,458,618 | 15 | 6.1s | 0.4s |
-| sample_xlarge.qvd | 1.7 GB | 87,617,047 | 6 | 36.8s | 1.6s |
+| sample_xlarge.qvd | 1.7 GB | 87,617,047 | 8 | 23.6s | 1.6s |
 | sample_huge.qvd | 2.8 GB | 11,907,648 | 42 | 24.3s | 2.4s |
-
-All 20 files — **byte-identical roundtrip** (MD5 match).
 
 ### vs PyQvd (Pure Python)
 
@@ -53,9 +53,31 @@ The streaming reader loads only symbol tables (small, unique values) into memory
 
 **Benchmark: 1.7 GB QVD, 87.6M rows → filter by 2 values, select 3 of 8 columns → 20.4M rows output**
 
+Qlik Sense script:
+```qlik
+types:
+LOAD * INLINE [%Type_ID
+7
+9];
+
+filtered:
+LOAD %Key_ID, DateField_BK, %Type_ID
+FROM [lib://data/large_table.qvd](qvd)
+WHERE EXISTS(%Type_ID);
+
+STORE filtered INTO [lib://data/result.qvd](qvd);
+DROP TABLE filtered;
+```
+
+qvdrs CLI equivalent:
+```bash
+qvd-cli filter large_table.qvd result.qvd \
+    --column %Type_ID --values 7,9 \
+    --select "%Key_ID,DateField_BK,%Type_ID"
+```
+
 | | Qlik Sense | qvdrs (streaming) |
 |---|---|---|
-| **Task** | `LOAD %Key_ID, DateField_BK, %Type_ID FROM large_table.qvd (qvd) WHERE %Type_ID=7 OR %Type_ID=9; STORE INTO result.qvd;` | `qvd-cli filter --column %Type_ID --values 7,9 --select %Key_ID,DateField_BK,%Type_ID` |
 | **Read + filter** | ~28s | **7.1s** |
 | **Total (→ QVD)** | **~28s** | **11.4s** |
 | **Total (→ Parquet)** | — | **15.5s** |
