@@ -212,8 +212,10 @@ fn builder_generates_valid_xml() {
 
     // Critical checks
     assert!(xml.contains("<EncryptionInfo></EncryptionInfo>"), "Missing EncryptionInfo");
-    assert!(!xml.contains("<Type></Type>"), "Empty <Type> — must be UNKNOWN");
-    assert!(xml.contains("<Type>UNKNOWN</Type>"), "Missing <Type>UNKNOWN</Type>");
+    assert!(!xml.contains("<Type></Type>"), "Empty <Type> — must have a valid type");
+    // Builder should produce proper Qlik-compatible types (INTEGER for numeric, ASCII for text)
+    assert!(xml.contains("<Type>INTEGER</Type>") || xml.contains("<Type>ASCII</Type>"),
+        "Missing proper NumberFormat type (expected INTEGER or ASCII)");
 
     // All field headers must have <Comment>
     let fields: Vec<&str> = xml.split("<QvdFieldHeader>").skip(1).collect();

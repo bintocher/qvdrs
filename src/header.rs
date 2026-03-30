@@ -269,10 +269,14 @@ pub fn write_xml_header(header: &QvdTableHeader) -> String {
             xml.push_str("     </LineageInfo>\r\n");
         }
         xml.push_str("   </Lineage>\r\n");
+    } else {
+        write_tag(&mut xml, 3, "Lineage", "");
     }
 
     write_tag(&mut xml, 3, "Comment", &header.comment);
     write_tag(&mut xml, 3, "EncryptionInfo", "");
+    write_tag(&mut xml, 3, "TableTags", "");
+    write_tag(&mut xml, 3, "ProfilingData", "");
     xml.push_str(" </QvdTableHeader>\r\n");
     xml
 }

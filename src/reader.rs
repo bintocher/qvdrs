@@ -77,12 +77,9 @@ impl QvdTable {
 
             // Find which old symbol indices are actually used
             let mut used: Vec<bool> = vec![false; old_symbols.len()];
-            let mut has_null = false;
             for &row in row_indices {
                 let idx = old_indices[row];
-                if idx < 0 {
-                    has_null = true;
-                } else if (idx as usize) < old_symbols.len() {
+                if idx >= 0 && (idx as usize) < old_symbols.len() {
                     used[idx as usize] = true;
                 }
             }
@@ -97,18 +94,18 @@ impl QvdTable {
                 }
             }
 
-            // Remap row indices
+            // Remap row indices; NULL → num_new_symbols (Qlik convention: bias=0)
+            let num_new_symbols = col_symbols.len();
             let mut col_indices: Vec<i64> = Vec::with_capacity(new_num_rows);
             for &row in row_indices {
                 let idx = old_indices[row];
-                if idx < 0 {
-                    col_indices.push(idx);
+                if idx < 0 || (idx as usize) >= old_symbols.len() {
+                    col_indices.push(num_new_symbols as i64); // NULL sentinel
                 } else {
                     col_indices.push(old_to_new[idx as usize]);
                 }
             }
 
-            let _ = has_null; // used implicitly via negative indices
             new_symbols.push(col_symbols);
             new_row_indices.push(col_indices);
         }
@@ -117,23 +114,26 @@ impl QvdTable {
         let mut header = self.header.clone();
         header.no_of_records = new_num_rows;
         for (col, field) in header.fields.iter_mut().enumerate() {
-            field.no_of_symbols = new_symbols[col].len();
+            let num_symbols = new_symbols[col].len();
+            field.no_of_symbols = num_symbols;
+            field.bias = 0;
+            field.bit_width = if num_symbols <= 1 { 0 } else { crate::index::bits_needed(num_symbols + 1) };
         }
-        // Recalculate bit widths
-        let mut bit_offset = 0;
-        for (col, field) in header.fields.iter_mut().enumerate() {
-            let has_null = new_row_indices[col].iter().any(|&i| i < 0);
-            field.bias = if has_null { -2 } else { 0 };
-            let total_needed = if has_null {
-                new_symbols[col].len() + 2
-            } else {
-                new_symbols[col].len()
-            };
-            field.bit_width = crate::index::bits_needed(total_needed);
-            field.bit_offset = bit_offset;
-            bit_offset += field.bit_width;
+        // Assign bit_offsets sorted by descending bit_width (Qlik convention)
+        let mut sortable: Vec<(usize, usize)> = header.fields.iter().enumerate()
+            .filter(|(_, f)| f.bit_width > 0)
+            .map(|(i, f)| (i, f.bit_width))
+            .collect();
+        sortable.sort_by(|a, b| b.1.cmp(&a.1));
+        let mut current_bit_offset = 0usize;
+        for (idx, _) in &sortable {
+            header.fields[*idx].bit_offset = current_bit_offset;
+            current_bit_offset += header.fields[*idx].bit_width;
         }
-        let total_bits = bit_offset;
+        for f in &mut header.fields {
+            if f.bit_width == 0 { f.bit_offset = 0; }
+        }
+        let total_bits = current_bit_offset;
         header.record_byte_size = if total_bits == 0 { 0 } else { total_bits.div_ceil(8) };
         header.offset = 0;
         header.length = 0;
@@ -178,6 +178,144 @@ impl QvdTable {
             }
         }
         matching_rows
+    }
+
+    /// Normalize the table for maximum Qlik Sense compatibility.
+    ///
+    /// Converts symbol types (DualInt→Int, DualDouble→Double for pure numbers,
+    /// keeps DualDouble for dates/timestamps), sets proper NumberFormat,
+    /// Tags, BitWidth, BitOffset ordering, and NULL representation.
+    ///
+    /// Call this before writing a QVD file to ensure Qlik can read it correctly.
+    pub fn normalize(&mut self) {
+        use crate::header::NumberFormat;
+
+        let num_cols = self.num_cols();
+
+        for col in 0..num_cols {
+            let symbols = &mut self.symbols[col];
+            let indices = &mut self.row_indices[col];
+            let field = &mut self.header.fields[col];
+            let num_symbols = symbols.len();
+
+            // 1. Convert symbol types: DualInt→Int, DualDouble→Double (except dates/timestamps)
+            let has_date_tag = field.tags.iter().any(|t| t == "$timestamp" || t == "$date")
+                || matches!(field.number_format.format_type.as_str(), "DATE" | "TIMESTAMP" | "1" | "3");
+            if !has_date_tag {
+                for sym in symbols.iter_mut() {
+                    *sym = match std::mem::replace(sym, QvdSymbol::Int(0)) {
+                        QvdSymbol::DualInt(v, _) => QvdSymbol::Int(v),
+                        QvdSymbol::DualDouble(v, _) => {
+                            if v.fract() == 0.0 && !v.is_nan() && !v.is_infinite()
+                                && v >= i32::MIN as f64 && v <= i32::MAX as f64
+                            {
+                                QvdSymbol::Int(v as i32)
+                            } else {
+                                QvdSymbol::Double(v)
+                            }
+                        }
+                        other => other,
+                    };
+                }
+            }
+
+            // 2. Remap NULL indices: any negative or >= num_symbols → num_symbols
+            for idx in indices.iter_mut() {
+                if *idx < 0 || (*idx as usize) >= num_symbols {
+                    *idx = num_symbols as i64;
+                }
+            }
+            field.bias = 0;
+
+            // 3. BitWidth: reserve NULL sentinel
+            field.bit_width = if num_symbols <= 1 { 0 } else {
+                crate::index::bits_needed(num_symbols + 1)
+            };
+
+            // 4. Determine NumberFormat from actual symbol types
+            let all_int = !symbols.is_empty() && symbols.iter().all(|s| matches!(s, QvdSymbol::Int(_)));
+            let all_numeric = !symbols.is_empty() && symbols.iter().all(|s|
+                matches!(s, QvdSymbol::Int(_) | QvdSymbol::Double(_) | QvdSymbol::DualInt(_, _) | QvdSymbol::DualDouble(_, _)));
+
+            if has_date_tag {
+                // Keep existing date/timestamp format
+            } else if all_int {
+                field.number_format = NumberFormat {
+                    format_type: "INTEGER".to_string(),
+                    n_dec: 0,
+                    use_thou: 1,
+                    fmt: "###0".to_string(),
+                    dec: ",".to_string(),
+                    thou: String::new(),
+                };
+            } else if all_numeric {
+                let has_any_double = symbols.iter().any(|s|
+                    matches!(s, QvdSymbol::Double(_) | QvdSymbol::DualDouble(_, _)));
+                if has_any_double {
+                    field.number_format = NumberFormat {
+                        format_type: "REAL".to_string(),
+                        n_dec: 14,
+                        use_thou: 1,
+                        fmt: "##############".to_string(),
+                        dec: ",".to_string(),
+                        thou: String::new(),
+                    };
+                } else {
+                    field.number_format = NumberFormat {
+                        format_type: "INTEGER".to_string(),
+                        n_dec: 0,
+                        use_thou: 1,
+                        fmt: "###0".to_string(),
+                        dec: ",".to_string(),
+                        thou: String::new(),
+                    };
+                }
+            } else {
+                field.number_format = NumberFormat {
+                    format_type: "ASCII".to_string(),
+                    ..NumberFormat::default()
+                };
+            }
+
+            // 5. Tags
+            if has_date_tag {
+                // Keep existing date/timestamp tags
+            } else if all_int {
+                field.tags = vec!["$numeric".to_string(), "$integer".to_string()];
+            } else if all_numeric {
+                field.tags = vec!["$numeric".to_string()];
+            } else {
+                let all_ascii = symbols.iter().all(|s|
+                    s.to_string_repr().bytes().all(|b| b.is_ascii()));
+                if all_ascii {
+                    field.tags = vec!["$ascii".to_string(), "$text".to_string()];
+                } else {
+                    field.tags = vec!["$text".to_string()];
+                }
+            }
+        }
+
+        // 6. BitOffset: sort by descending bit_width (Qlik convention)
+        let mut sortable: Vec<(usize, usize)> = self.header.fields.iter().enumerate()
+            .filter(|(_, f)| f.bit_width > 0)
+            .map(|(i, f)| (i, f.bit_width))
+            .collect();
+        sortable.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let mut current_bit_offset = 0usize;
+        for (idx, _) in &sortable {
+            self.header.fields[*idx].bit_offset = current_bit_offset;
+            current_bit_offset += self.header.fields[*idx].bit_width;
+        }
+        for f in &mut self.header.fields {
+            if f.bit_width == 0 { f.bit_offset = 0; }
+        }
+        let total_bits = current_bit_offset;
+        self.header.record_byte_size = if total_bits == 0 { 0 } else { total_bits.div_ceil(8) };
+
+        // 7. Clear raw bytes to force regeneration on write
+        self.raw_xml.clear();
+        self.raw_binary.clear();
     }
 }
 

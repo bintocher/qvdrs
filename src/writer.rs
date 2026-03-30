@@ -125,19 +125,17 @@ impl QvdTableBuilder {
         let mut fields = Vec::new();
         let mut all_symbols = Vec::new();
         let mut all_indices = Vec::new();
-        let mut bit_offset = 0usize;
 
         for col in &self.columns {
             let mut symbol_map: HashMap<String, usize> = HashMap::new();
             let mut symbols: Vec<QvdSymbol> = Vec::new();
             let mut indices: Vec<i64> = Vec::with_capacity(num_rows);
             let has_null = col.values.iter().any(|v| v.is_none());
-            let bias: i32 = if has_null { -2 } else { 0 };
 
             for val in &col.values {
                 match val {
                     None => {
-                        indices.push(-2);
+                        indices.push(-2); // temporary placeholder
                     }
                     Some(s) => {
                         let sym_idx = if let Some(&idx) = symbol_map.get(s) {
@@ -146,9 +144,15 @@ impl QvdTableBuilder {
                             let idx = symbols.len();
                             symbol_map.insert(s.clone(), idx);
                             if let Ok(v) = s.parse::<i32>() {
-                                symbols.push(QvdSymbol::DualInt(v, s.clone()));
+                                symbols.push(QvdSymbol::Int(v));
                             } else if let Ok(v) = s.parse::<f64>() {
-                                symbols.push(QvdSymbol::DualDouble(v, s.clone()));
+                                if v.fract() == 0.0 && !v.is_nan() && !v.is_infinite()
+                                    && v >= i32::MIN as f64 && v <= i32::MAX as f64
+                                {
+                                    symbols.push(QvdSymbol::Int(v as i32));
+                                } else {
+                                    symbols.push(QvdSymbol::Double(v));
+                                }
                             } else {
                                 symbols.push(QvdSymbol::Text(s.clone()));
                             }
@@ -160,33 +164,96 @@ impl QvdTableBuilder {
             }
 
             let num_symbols = symbols.len();
-            let total_needed = if has_null { num_symbols + 2 } else { num_symbols };
-            let bit_width = bits_needed(total_needed);
+
+            // Remap NULL indices from -2 to num_symbols (Qlik convention)
+            if has_null {
+                for idx in &mut indices {
+                    if *idx == -2 {
+                        *idx = num_symbols as i64;
+                    }
+                }
+            }
+
+            let bias = 0i32;
+            let bit_width = if num_symbols <= 1 { 0 } else { bits_needed(num_symbols + 1) };
+
+            // Determine tags based on symbol types
+            let all_numeric = !symbols.is_empty() && symbols.iter().all(|s| matches!(s, QvdSymbol::Int(_) | QvdSymbol::Double(_)));
+            let all_int = !symbols.is_empty() && symbols.iter().all(|s| matches!(s, QvdSymbol::Int(_)));
+            let tags = if all_int {
+                vec!["$numeric".to_string(), "$integer".to_string()]
+            } else if all_numeric {
+                vec!["$numeric".to_string()]
+            } else {
+                let all_ascii = symbols.iter().all(|s| s.to_string_repr().bytes().all(|b| b.is_ascii()));
+                if all_ascii {
+                    vec!["$ascii".to_string(), "$text".to_string()]
+                } else {
+                    vec!["$text".to_string()]
+                }
+            };
+
+            // Determine NumberFormat based on symbol types
+            let number_format = if all_int {
+                NumberFormat {
+                    format_type: "INTEGER".to_string(),
+                    n_dec: 0,
+                    use_thou: 1,
+                    fmt: "###0".to_string(),
+                    dec: ",".to_string(),
+                    thou: String::new(),
+                }
+            } else if all_numeric {
+                NumberFormat {
+                    format_type: "REAL".to_string(),
+                    n_dec: 14,
+                    use_thou: 1,
+                    fmt: "##############".to_string(),
+                    dec: ",".to_string(),
+                    thou: String::new(),
+                }
+            } else {
+                NumberFormat {
+                    format_type: "ASCII".to_string(),
+                    ..NumberFormat::default()
+                }
+            };
 
             fields.push(QvdFieldHeader {
                 field_name: col.name.clone(),
-                bit_offset,
+                bit_offset: 0, // assigned below after sorting
                 bit_width,
                 bias,
-                number_format: NumberFormat::default(),
+                number_format,
                 no_of_symbols: num_symbols,
                 offset: 0,
                 length: 0,
                 comment: String::new(),
-                tags: Vec::new(),
+                tags,
             });
 
             all_symbols.push(symbols);
             all_indices.push(indices);
-            bit_offset += bit_width;
         }
 
-        let total_bits = bit_offset;
-        let record_byte_size = total_bits.div_ceil(8);
+        // Assign bit_offsets sorted by descending bit_width (Qlik convention)
+        let mut sortable: Vec<(usize, usize)> = fields.iter().enumerate()
+            .filter(|(_, f)| f.bit_width > 0)
+            .map(|(i, f)| (i, f.bit_width))
+            .collect();
+        sortable.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let mut current_bit_offset = 0usize;
+        for (idx, _) in &sortable {
+            fields[*idx].bit_offset = current_bit_offset;
+            current_bit_offset += fields[*idx].bit_width;
+        }
+        let total_bits = current_bit_offset;
+        let record_byte_size = if total_bits == 0 { 0 } else { total_bits.div_ceil(8) };
 
         let header = QvdTableHeader {
-            qv_build_no: "0".to_string(),
-            creator_doc: String::new(),
+            qv_build_no: "50699".to_string(),
+            creator_doc: format!("qvdrs v{}", env!("CARGO_PKG_VERSION")),
             create_utc_time: String::new(),
             source_create_utc_time: String::new(),
             source_file_utc_time: String::new(),

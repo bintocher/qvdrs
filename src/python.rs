@@ -247,6 +247,12 @@ impl PyQvdTable {
         Ok(PyQvdTable { inner: filtered })
     }
 
+    /// Normalize the table for maximum Qlik Sense compatibility.
+    /// Converts DualInt→Int, DualDouble→Double, sets proper NumberFormat/Tags/BitWidth.
+    fn normalize(&mut self) {
+        self.inner.normalize();
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "QvdTable(table='{}', rows={}, cols={})",

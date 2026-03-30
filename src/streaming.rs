@@ -293,7 +293,6 @@ impl<R: Read + Seek + BufRead> QvdStreamReader<R> {
 
         // Compact symbols: remove unused ones, remap indices
         let mut new_symbols: Vec<Vec<QvdSymbol>> = Vec::with_capacity(num_output_cols);
-        let mut bit_offset = 0usize;
         for (out_idx, field) in header.fields.iter_mut().enumerate() {
             let orig_col_idx = output_col_indices[out_idx];
             let old_syms = &self.symbols[orig_col_idx];
@@ -301,11 +300,8 @@ impl<R: Read + Seek + BufRead> QvdStreamReader<R> {
 
             // Find used symbol indices
             let mut used = vec![false; old_syms.len()];
-            let mut has_null = false;
             for &idx in col_indices.iter() {
-                if idx < 0 {
-                    has_null = true;
-                } else if (idx as usize) < old_syms.len() {
+                if idx >= 0 && (idx as usize) < old_syms.len() {
                     used[idx as usize] = true;
                 }
             }
@@ -320,24 +316,38 @@ impl<R: Read + Seek + BufRead> QvdStreamReader<R> {
                 }
             }
 
-            // Remap indices in-place
+            // Remap indices in-place; NULL → num_new_symbols (Qlik convention: bias=0)
+            let num_new_symbols = compacted.len();
             for idx in col_indices.iter_mut() {
-                if *idx >= 0 {
+                if *idx < 0 || (*idx as usize) >= old_syms.len() {
+                    *idx = num_new_symbols as i64; // NULL sentinel
+                } else {
                     *idx = old_to_new[*idx as usize];
                 }
             }
 
-            field.no_of_symbols = compacted.len();
-            field.bias = if has_null { -2 } else { 0 };
-            let total_needed = if has_null { compacted.len() + 2 } else { compacted.len() };
-            field.bit_width = crate::index::bits_needed(total_needed);
-            field.bit_offset = bit_offset;
-            bit_offset += field.bit_width;
+            field.no_of_symbols = num_new_symbols;
+            field.bias = 0;
+            field.bit_width = if num_new_symbols <= 1 { 0 } else { crate::index::bits_needed(num_new_symbols + 1) };
 
             new_symbols.push(compacted);
         }
 
-        let total_bits = bit_offset;
+        // Assign bit_offsets sorted by descending bit_width (Qlik convention)
+        let mut sortable: Vec<(usize, usize)> = header.fields.iter().enumerate()
+            .filter(|(_, f)| f.bit_width > 0)
+            .map(|(i, f)| (i, f.bit_width))
+            .collect();
+        sortable.sort_by(|a, b| b.1.cmp(&a.1));
+        let mut current_bit_offset = 0usize;
+        for (idx, _) in &sortable {
+            header.fields[*idx].bit_offset = current_bit_offset;
+            current_bit_offset += header.fields[*idx].bit_width;
+        }
+        for f in &mut header.fields {
+            if f.bit_width == 0 { f.bit_offset = 0; }
+        }
+        let total_bits = current_bit_offset;
         header.record_byte_size = if total_bits == 0 { 0 } else { total_bits.div_ceil(8) };
 
         Ok(crate::reader::QvdTable {

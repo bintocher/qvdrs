@@ -53,15 +53,13 @@ pub fn read_parquet_to_qvd(path: &str) -> QvdResult<QvdTable> {
     let table_name = Path::new(path)
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("table")
+        .unwrap_or("qvdtable")
         .to_string();
 
     // Build symbol tables and indices for each column
     let mut all_symbols: Vec<Vec<QvdSymbol>> = Vec::with_capacity(num_cols);
     let mut all_indices: Vec<Vec<i64>> = Vec::with_capacity(num_cols);
     let mut fields: Vec<QvdFieldHeader> = Vec::with_capacity(num_cols);
-    let mut bit_offset = 0usize;
-
     for col_idx in 0..num_cols {
         let field = &schema.fields()[col_idx];
         let col_name = field.name().clone();
@@ -72,18 +70,26 @@ pub fn read_parquet_to_qvd(path: &str) -> QvdResult<QvdTable> {
             .map(|b| b.column(col_idx).as_ref())
             .collect();
 
-        let col_result = process_column_fast(&arrays, &data_type, num_rows);
-
-        let bias: i32 = if col_result.has_null { -2 } else { 0 };
+        let mut col_result = process_column_fast(&arrays, &data_type, num_rows);
         let num_symbols = col_result.symbols.len();
-        let total_needed = if col_result.has_null { num_symbols + 2 } else { num_symbols };
-        let bit_width = bits_needed(total_needed);
+
+        // Remap NULL indices from -2 to num_symbols (Qlik convention: bias=0, NULL=num_symbols)
+        if col_result.has_null {
+            for idx in &mut col_result.indices {
+                if *idx == -2 {
+                    *idx = num_symbols as i64;
+                }
+            }
+        }
+
+        let bias = 0i32;
+        let bit_width = if num_symbols <= 1 { 0 } else { bits_needed(num_symbols + 1) };
         let tags = compute_tags(&data_type, &col_result.symbols);
         let number_format = compute_number_format(&data_type);
 
         fields.push(QvdFieldHeader {
             field_name: col_name,
-            bit_offset,
+            bit_offset: 0, // assigned below after sorting
             bit_width,
             bias,
             number_format,
@@ -96,15 +102,26 @@ pub fn read_parquet_to_qvd(path: &str) -> QvdResult<QvdTable> {
 
         all_symbols.push(col_result.symbols);
         all_indices.push(col_result.indices);
-        bit_offset += bit_width;
     }
 
-    let total_bits = bit_offset;
+    // Assign bit_offsets sorted by descending bit_width (Qlik convention)
+    let mut sortable: Vec<(usize, usize)> = fields.iter().enumerate()
+        .filter(|(_, f)| f.bit_width > 0)
+        .map(|(i, f)| (i, f.bit_width))
+        .collect();
+    sortable.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut current_bit_offset = 0usize;
+    for (idx, _) in &sortable {
+        fields[*idx].bit_offset = current_bit_offset;
+        current_bit_offset += fields[*idx].bit_width;
+    }
+    let total_bits = current_bit_offset;
     let record_byte_size = if total_bits == 0 { 0 } else { total_bits.div_ceil(8) };
 
     let header = QvdTableHeader {
-        qv_build_no: "0".to_string(),
-        creator_doc: String::new(),
+        qv_build_no: "50699".to_string(),
+        creator_doc: format!("qvdrs v{}", env!("CARGO_PKG_VERSION")),
         create_utc_time: chrono_now_utc(),
         source_create_utc_time: String::new(),
         source_file_utc_time: String::new(),
@@ -334,7 +351,7 @@ where
                 } else {
                     let idx = symbols.len();
                     map.insert(v, idx);
-                    symbols.push(QvdSymbol::DualInt(v, v.to_string()));
+                    symbols.push(QvdSymbol::Int(v));
                     idx
                 };
                 indices.push(sym_idx as i64);
@@ -366,9 +383,9 @@ fn process_int64_column(arrays: &[&dyn Array], total_rows: usize) -> ColumnResul
                     let idx = symbols.len();
                     map.insert(v, idx);
                     if v >= i32::MIN as i64 && v <= i32::MAX as i64 {
-                        symbols.push(QvdSymbol::DualInt(v as i32, v.to_string()));
+                        symbols.push(QvdSymbol::Int(v as i32));
                     } else {
-                        symbols.push(QvdSymbol::DualDouble(v as f64, v.to_string()));
+                        symbols.push(QvdSymbol::Double(v as f64));
                     }
                     idx
                 };
@@ -400,9 +417,9 @@ fn process_uint32_column(arrays: &[&dyn Array], total_rows: usize) -> ColumnResu
                     let idx = symbols.len();
                     map.insert(v, idx);
                     if v <= i32::MAX as u32 {
-                        symbols.push(QvdSymbol::DualInt(v as i32, v.to_string()));
+                        symbols.push(QvdSymbol::Int(v as i32));
                     } else {
-                        symbols.push(QvdSymbol::DualDouble(v as f64, v.to_string()));
+                        symbols.push(QvdSymbol::Double(v as f64));
                     }
                     idx
                 };
@@ -434,9 +451,9 @@ fn process_uint64_column(arrays: &[&dyn Array], total_rows: usize) -> ColumnResu
                     let idx = symbols.len();
                     map.insert(v, idx);
                     if v <= i32::MAX as u64 {
-                        symbols.push(QvdSymbol::DualInt(v as i32, v.to_string()));
+                        symbols.push(QvdSymbol::Int(v as i32));
                     } else {
-                        symbols.push(QvdSymbol::DualDouble(v as f64, v.to_string()));
+                        symbols.push(QvdSymbol::Double(v as f64));
                     }
                     idx
                 };
@@ -471,7 +488,13 @@ where
                 } else {
                     let idx = symbols.len();
                     map.insert(bits, idx);
-                    symbols.push(QvdSymbol::DualDouble(v, v.to_string()));
+                    if v.fract() == 0.0 && !v.is_nan() && !v.is_infinite()
+                        && v >= i32::MIN as f64 && v <= i32::MAX as f64
+                    {
+                        symbols.push(QvdSymbol::Int(v as i32));
+                    } else {
+                        symbols.push(QvdSymbol::Double(v));
+                    }
                     idx
                 };
                 indices.push(sym_idx as i64);
@@ -499,14 +522,14 @@ fn process_boolean_column(arrays: &[&dyn Array], total_rows: usize) -> ColumnRes
             } else if arr.value(row) {
                 let idx = *sym_true.get_or_insert_with(|| {
                     let i = symbols.len();
-                    symbols.push(QvdSymbol::DualInt(1, "1".to_string()));
+                    symbols.push(QvdSymbol::Int(1));
                     i
                 });
                 indices.push(idx as i64);
             } else {
                 let idx = *sym_false.get_or_insert_with(|| {
                     let i = symbols.len();
-                    symbols.push(QvdSymbol::DualInt(0, "0".to_string()));
+                    symbols.push(QvdSymbol::Int(0));
                     i
                 });
                 indices.push(idx as i64);
@@ -629,7 +652,7 @@ fn chrono_now_utc() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-fn compute_tags(data_type: &DataType, _symbols: &[QvdSymbol]) -> Vec<String> {
+fn compute_tags(data_type: &DataType, symbols: &[QvdSymbol]) -> Vec<String> {
     match data_type {
         DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64
         | DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64 => {
@@ -642,13 +665,20 @@ fn compute_tags(data_type: &DataType, _symbols: &[QvdSymbol]) -> Vec<String> {
             vec!["$numeric".to_string(), "$integer".to_string()]
         }
         DataType::Date32 | DataType::Date64 => {
-            vec!["$numeric".to_string(), "$timestamp".to_string()]
+            vec!["$numeric".to_string(), "$timestamp".to_string(), "$integer".to_string(), "$date".to_string()]
         }
         DataType::Timestamp(_, _) => {
             vec!["$numeric".to_string(), "$timestamp".to_string()]
         }
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Dictionary(_, _) => {
-            vec!["$text".to_string()]
+            let all_ascii = symbols.iter().all(|s| {
+                s.to_string_repr().bytes().all(|b| b.is_ascii())
+            });
+            if all_ascii {
+                vec!["$ascii".to_string(), "$text".to_string()]
+            } else {
+                vec!["$text".to_string()]
+            }
         }
         _ => Vec::new(),
     }
@@ -656,12 +686,34 @@ fn compute_tags(data_type: &DataType, _symbols: &[QvdSymbol]) -> Vec<String> {
 
 fn compute_number_format(data_type: &DataType) -> NumberFormat {
     match data_type {
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Dictionary(_, _) => NumberFormat {
+            format_type: "ASCII".to_string(),
+            ..Default::default()
+        },
+        DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64
+        | DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64
+        | DataType::Boolean => NumberFormat {
+            format_type: "INTEGER".to_string(),
+            n_dec: 0,
+            use_thou: 1,
+            fmt: "###0".to_string(),
+            dec: ",".to_string(),
+            thou: String::new(),
+        },
+        DataType::Float32 | DataType::Float64 => NumberFormat {
+            format_type: "REAL".to_string(),
+            n_dec: 14,
+            use_thou: 1,
+            fmt: "##############".to_string(),
+            dec: ",".to_string(),
+            thou: String::new(),
+        },
         DataType::Date32 | DataType::Date64 => NumberFormat {
-            format_type: "1".to_string(),
+            format_type: "DATE".to_string(),
             ..Default::default()
         },
         DataType::Timestamp(_, _) => NumberFormat {
-            format_type: "3".to_string(),
+            format_type: "TIMESTAMP".to_string(),
             ..Default::default()
         },
         _ => NumberFormat::default(),
@@ -681,9 +733,9 @@ fn infer_arrow_type(field: &QvdFieldHeader, symbols: &[QvdSymbol]) -> DataType {
     let has_tag = |t: &str| field.tags.iter().any(|tag| tag == t);
 
     match fmt_type {
-        "1" => return DataType::Date32,
-        "2" => return DataType::Utf8,
-        "3" => return DataType::Timestamp(TimeUnit::Microsecond, None),
+        "DATE" | "1" => return DataType::Date32,
+        "ASCII" | "2" => return DataType::Utf8,
+        "TIMESTAMP" | "3" => return DataType::Timestamp(TimeUnit::Microsecond, None),
         _ => {}
     }
 
@@ -946,26 +998,32 @@ pub fn record_batch_to_qvd(batch: &RecordBatch, table_name: &str) -> QvdResult<Q
     let mut all_symbols: Vec<Vec<QvdSymbol>> = Vec::with_capacity(num_cols);
     let mut all_indices: Vec<Vec<i64>> = Vec::with_capacity(num_cols);
     let mut fields: Vec<QvdFieldHeader> = Vec::with_capacity(num_cols);
-    let mut bit_offset = 0usize;
-
     for col_idx in 0..num_cols {
         let arrow_field = &schema.fields()[col_idx];
         let col_name = arrow_field.name().clone();
         let data_type = arrow_field.data_type().clone();
         let array = batch.column(col_idx);
 
-        let col_result = process_column_fast(&[array.as_ref()], &data_type, num_rows);
-
-        let bias: i32 = if col_result.has_null { -2 } else { 0 };
+        let mut col_result = process_column_fast(&[array.as_ref()], &data_type, num_rows);
         let num_symbols = col_result.symbols.len();
-        let total_needed = if col_result.has_null { num_symbols + 2 } else { num_symbols };
-        let bit_width = bits_needed(total_needed);
+
+        // Remap NULL indices from -2 to num_symbols (Qlik convention)
+        if col_result.has_null {
+            for idx in &mut col_result.indices {
+                if *idx == -2 {
+                    *idx = num_symbols as i64;
+                }
+            }
+        }
+
+        let bias = 0i32;
+        let bit_width = if num_symbols <= 1 { 0 } else { bits_needed(num_symbols + 1) };
         let tags = compute_tags(&data_type, &col_result.symbols);
         let number_format = compute_number_format(&data_type);
 
         fields.push(QvdFieldHeader {
             field_name: col_name,
-            bit_offset,
+            bit_offset: 0, // assigned below after sorting
             bit_width,
             bias,
             number_format,
@@ -978,15 +1036,26 @@ pub fn record_batch_to_qvd(batch: &RecordBatch, table_name: &str) -> QvdResult<Q
 
         all_symbols.push(col_result.symbols);
         all_indices.push(col_result.indices);
-        bit_offset += bit_width;
     }
 
-    let total_bits = bit_offset;
+    // Assign bit_offsets sorted by descending bit_width (Qlik convention)
+    let mut sortable: Vec<(usize, usize)> = fields.iter().enumerate()
+        .filter(|(_, f)| f.bit_width > 0)
+        .map(|(i, f)| (i, f.bit_width))
+        .collect();
+    sortable.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut current_bit_offset = 0usize;
+    for (idx, _) in &sortable {
+        fields[*idx].bit_offset = current_bit_offset;
+        current_bit_offset += fields[*idx].bit_width;
+    }
+    let total_bits = current_bit_offset;
     let record_byte_size = if total_bits == 0 { 0 } else { total_bits.div_ceil(8) };
 
     let header = QvdTableHeader {
-        qv_build_no: "0".to_string(),
-        creator_doc: String::new(),
+        qv_build_no: "50699".to_string(),
+        creator_doc: format!("qvdrs v{}", env!("CARGO_PKG_VERSION")),
         create_utc_time: chrono_now_utc(),
         source_create_utc_time: String::new(),
         source_file_utc_time: String::new(),
