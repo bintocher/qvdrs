@@ -1,6 +1,6 @@
 [package]
 name = "qvd"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "High-performance library for reading, writing and converting Qlik QVD files with Parquet/Arrow/DataFusion support"
 license = "MIT"
@@ -18,7 +18,7 @@ name = "qvd"
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module", "abi3-py312"], optional = true }
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py39"], optional = true }
 parquet = { version = "58", optional = true }
 arrow = { version = "58", default-features = false, features = ["chrono-tz"], optional = true }
 chrono = { version = "0.4", optional = true }

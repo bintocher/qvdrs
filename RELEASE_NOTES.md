@@ -2,6 +2,16 @@
 
 ---
 
+## v0.6.2
+
+- Fix: abi3 minimum lowered from py312 to py39 — wheels now work on **Python 3.9+** (3.10, 3.11, 3.12, 3.13, 3.14)
+- v0.6.1 fixed CI to build abi3 wheels but still required Python >= 3.12; this release fixes that
+
+## v0.6.1
+
+- Fix: PyPI wheels now use abi3 stable ABI (single wheel per platform for all Python versions)
+- Previously wheels were tagged cp313-only, causing install failures on other Python versions
+
 ## v0.6.0
 
 ### New Features
