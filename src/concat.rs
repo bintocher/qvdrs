@@ -11,20 +11,15 @@ use crate::reader::QvdTable;
 use crate::value::QvdSymbol;
 
 /// Schema compatibility mode for concatenation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SchemaMode {
     /// Strict: both tables must have identical column names (in any order).
     /// Error if columns differ. This is the default.
+    #[default]
     Strict,
     /// Union: columns are matched by name; missing columns are filled with NULL.
     /// Matches Qlik CONCATENATE behavior.
     Union,
-}
-
-impl Default for SchemaMode {
-    fn default() -> Self {
-        SchemaMode::Strict
-    }
 }
 
 /// Conflict resolution strategy when a PK collision is detected.
