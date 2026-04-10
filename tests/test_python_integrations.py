@@ -408,6 +408,195 @@ def test_data_types(qvd_path: str):
     os.unlink(tmp)
 
 
+# ── Test: concatenate ────────────────────────────────────────────────
+
+def test_concatenate(qvd_path):
+    """Test Layer 0 (pure append) and Layer 1 (PK dedup) concatenation."""
+    import pyarrow as pa
+    import qvd
+
+    print("\n== Test: concatenate (pure append) ==")
+
+    # Create two small tables
+    batch_a = pa.record_batch({
+        "id": pa.array([1, 2, 3], type=pa.int32()),
+        "val": pa.array(["a", "b", "c"], type=pa.utf8()),
+    })
+    batch_b = pa.record_batch({
+        "id": pa.array([4, 5], type=pa.int32()),
+        "val": pa.array(["d", "e"], type=pa.utf8()),
+    })
+
+    table_a = qvd.QvdTable.from_arrow(batch_a, table_name="test")
+    table_b = qvd.QvdTable.from_arrow(batch_b, table_name="test")
+
+    # Method: QvdTable.concatenate
+    merged = table_a.concatenate(table_b)
+    assert_eq("concat rows", merged.num_rows, 5)
+    assert_eq("concat cols", merged.num_cols, 2)
+
+    # Verify values
+    arrow = merged.to_arrow()
+    ids = arrow.column("id").to_pylist()
+    vals = arrow.column("val").to_pylist()
+    assert_eq("concat ids", sorted(ids), [1, 2, 3, 4, 5])
+    assert_eq("concat vals", sorted(vals), ["a", "b", "c", "d", "e"])
+
+    # Schema union: different columns
+    batch_c = pa.record_batch({
+        "id": pa.array([6], type=pa.int32()),
+        "extra": pa.array(["x"], type=pa.utf8()),
+    })
+    table_c = qvd.QvdTable.from_arrow(batch_c, table_name="test")
+
+    # Strict mode (default) should reject different columns
+    try:
+        table_a.concatenate(table_c)
+        fail("strict rejects mismatch", "should have raised ValueError")
+    except ValueError as e:
+        if "Schema mismatch" in str(e):
+            ok("strict rejects schema mismatch")
+        else:
+            fail("strict rejects mismatch", f"wrong error: {e}")
+
+    # Union mode should allow different columns
+    merged2 = table_a.concatenate(table_c, schema="union")
+    assert_eq("schema union cols", merged2.num_cols, 3)  # id, val, extra
+    assert_eq("schema union rows", merged2.num_rows, 4)
+
+    # File-level: concatenate_qvd
+    with tempfile.NamedTemporaryFile(suffix=".qvd", delete=False) as f:
+        tmp_a = f.name
+    with tempfile.NamedTemporaryFile(suffix=".qvd", delete=False) as f:
+        tmp_b = f.name
+    with tempfile.NamedTemporaryFile(suffix=".qvd", delete=False) as f:
+        tmp_out = f.name
+
+    table_a.save(tmp_a)
+    table_b.save(tmp_b)
+    qvd.concatenate_qvd(tmp_a, tmp_b, tmp_out)
+    result = qvd.read_qvd(tmp_out)
+    assert_eq("file concat rows", result.num_rows, 5)
+
+    # Concat with Arrow batch directly
+    qvd.concatenate_qvd(tmp_a, batch_b, tmp_out)
+    result2 = qvd.read_qvd(tmp_out)
+    assert_eq("concat arrow batch rows", result2.num_rows, 5)
+
+    os.unlink(tmp_a)
+    os.unlink(tmp_b)
+    os.unlink(tmp_out)
+
+
+def test_concatenate_pk(qvd_path):
+    """Test PK-based deduplication."""
+    import pyarrow as pa
+    import qvd
+
+    print("\n== Test: concatenate_pk (PK dedup) ==")
+
+    batch_existing = pa.record_batch({
+        "pk": pa.array([1, 2, 3], type=pa.int32()),
+        "val": pa.array(["old1", "old2", "old3"], type=pa.utf8()),
+    })
+    batch_new = pa.record_batch({
+        "pk": pa.array([2, 4], type=pa.int32()),
+        "val": pa.array(["new2", "new4"], type=pa.utf8()),
+    })
+
+    existing = qvd.QvdTable.from_arrow(batch_existing, table_name="test")
+    new_rows = qvd.QvdTable.from_arrow(batch_new, table_name="test")
+
+    # Replace (new wins)
+    result = existing.concatenate_pk(new_rows, pk="pk", on_conflict="replace")
+    assert_eq("replace rows", result.num_rows, 4)
+    arrow = result.to_arrow()
+    pairs = sorted(zip(arrow.column("pk").to_pylist(), arrow.column("val").to_pylist()))
+    assert_eq("replace pk=2 is new", pairs[1], (2, "new2"))
+    assert_eq("replace pk=4 added", pairs[3], (4, "new4"))
+
+    # Skip (existing wins)
+    result2 = existing.concatenate_pk(new_rows, pk="pk", on_conflict="skip")
+    assert_eq("skip rows", result2.num_rows, 4)
+    arrow2 = result2.to_arrow()
+    pairs2 = sorted(zip(arrow2.column("pk").to_pylist(), arrow2.column("val").to_pylist()))
+    assert_eq("skip pk=2 is old", pairs2[1], (2, "old2"))
+
+    # Error on conflict
+    try:
+        existing.concatenate_pk(new_rows, pk="pk", on_conflict="error")
+        fail("error on conflict", "should have raised")
+    except ValueError as e:
+        if "PK collision" in str(e):
+            ok("error on conflict raises ValueError")
+        else:
+            fail("error on conflict", f"wrong message: {e}")
+
+    # File-level: concatenate_pk_qvd
+    with tempfile.NamedTemporaryFile(suffix=".qvd", delete=False) as f:
+        tmp_existing = f.name
+    with tempfile.NamedTemporaryFile(suffix=".qvd", delete=False) as f:
+        tmp_out = f.name
+
+    existing.save(tmp_existing)
+    qvd.concatenate_pk_qvd(tmp_existing, batch_new, tmp_out, pk="pk", on_conflict="replace")
+    result3 = qvd.read_qvd(tmp_out)
+    assert_eq("file pk replace rows", result3.num_rows, 4)
+
+    # Composite PK
+    batch_e = pa.record_batch({
+        "a": pa.array([1, 1], type=pa.int32()),
+        "b": pa.array(["x", "y"], type=pa.utf8()),
+        "val": pa.array(["old", "old"], type=pa.utf8()),
+    })
+    batch_n = pa.record_batch({
+        "a": pa.array([1], type=pa.int32()),
+        "b": pa.array(["x"], type=pa.utf8()),
+        "val": pa.array(["new"], type=pa.utf8()),
+    })
+    te = qvd.QvdTable.from_arrow(batch_e, table_name="t")
+    tn = qvd.QvdTable.from_arrow(batch_n, table_name="t")
+    result4 = te.concatenate_pk(tn, pk=["a", "b"], on_conflict="replace")
+    assert_eq("composite pk rows", result4.num_rows, 2)
+
+    os.unlink(tmp_existing)
+    os.unlink(tmp_out)
+
+
+def test_write_arrow():
+    """Test qvd.write_arrow() convenience function."""
+    import pyarrow as pa
+    import qvd
+
+    print("\n== Test: write_arrow ==")
+
+    batch = pa.record_batch({
+        "id": pa.array([1, 2, 3], type=pa.int32()),
+        "name": pa.array(["a", "b", "c"], type=pa.utf8()),
+    })
+
+    with tempfile.NamedTemporaryFile(suffix=".qvd", delete=False) as f:
+        tmp = f.name
+
+    # Write RecordBatch
+    qvd.write_arrow(batch, tmp, table_name="test_table")
+    result = qvd.read_qvd(tmp)
+    assert_eq("write_arrow batch rows", result.num_rows, 3)
+    assert_eq("write_arrow table_name", result.table_name, "test_table")
+
+    # Write Arrow Table
+    arrow_table = pa.table({
+        "x": pa.array([10, 20], type=pa.int64()),
+        "y": pa.array(["hello", "world"], type=pa.utf8()),
+    })
+    qvd.write_arrow(arrow_table, tmp, table_name="from_table")
+    result2 = qvd.read_qvd(tmp)
+    assert_eq("write_arrow table rows", result2.num_rows, 2)
+    assert_eq("write_arrow table name", result2.table_name, "from_table")
+
+    os.unlink(tmp)
+
+
 # ── main ─────────────────────────────────────────────────────────────
 
 def main():
@@ -465,6 +654,9 @@ def main():
     test_exists_index(qvd_path)
     test_parquet(qvd_path)
     test_data_types(qvd_path)
+    test_concatenate(qvd_path)
+    test_concatenate_pk(qvd_path)
+    test_write_arrow()
 
     # Cleanup
     os.unlink(qvd_path)

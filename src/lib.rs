@@ -14,6 +14,10 @@
 //!   Requires feature `datafusion_support`.
 //! - **Streaming reader** — read QVD in chunks without loading entire file into memory
 //! - **EXISTS() index** — O(1) hash lookup, like Qlik's `EXISTS()` function
+//! - **Concatenate** — merge QVD tables with Qlik CONCATENATE semantics (schema union, NULL fill)
+//! - **Concatenate with PK** — upsert/dedup merge with primary key: Replace, Skip, or Error on conflict.
+//!   First QVD library in any language with PK-based merge
+//! - **write_arrow** — write PyArrow RecordBatch/Table directly to QVD (no Parquet roundtrip)
 //! - **Python bindings** — PyArrow, pandas, Polars via zero-copy Arrow bridge
 //! - **Zero dependencies** for core read/write (Parquet/Arrow/DataFusion are optional)
 //!
@@ -78,6 +82,29 @@
 //! // Use with DataFusion, DuckDB, Polars...
 //! ```
 //!
+//! ### Concatenate — merge QVD tables
+//!
+//! ```no_run
+//! use qvd::{read_qvd_file, concatenate, write_qvd_file};
+//!
+//! let a = read_qvd_file("data_jan.qvd").unwrap();
+//! let b = read_qvd_file("data_feb.qvd").unwrap();
+//! let merged = concatenate(&a, &b).unwrap();
+//! write_qvd_file(&merged, "data_all.qvd").unwrap();
+//! ```
+//!
+//! ### Concatenate with PK — upsert/dedup merge
+//!
+//! ```no_run
+//! use qvd::{read_qvd_file, concatenate_with_pk, OnConflict, write_qvd_file};
+//!
+//! let existing = read_qvd_file("master.qvd").unwrap();
+//! let updates = read_qvd_file("delta.qvd").unwrap();
+//! // New rows win on PK collision (upsert)
+//! let merged = concatenate_with_pk(&existing, &updates, &["ID"], OnConflict::Replace).unwrap();
+//! write_qvd_file(&merged, "master_updated.qvd").unwrap();
+//! ```
+//!
 //! ### DataFusion SQL (feature `datafusion_support`)
 //!
 //! ```ignore
@@ -124,6 +151,9 @@ pub mod exists;
 /// See [`QvdStreamReader`], [`open_qvd_stream`], and [`QvdStreamReader::read_filtered`]
 /// for EXISTS()-style filtered reads that are 2.5x faster than Qlik Sense.
 pub mod streaming;
+/// QVD table concatenation and merge operations.
+/// See [`concatenate`] for pure append and [`concatenate_with_pk`] for PK-based upsert.
+pub mod concat;
 
 /// Parquet/Arrow ↔ QVD conversion (requires feature `parquet_support`).
 #[cfg(any(feature = "parquet_support", feature = "python"))]
@@ -144,6 +174,7 @@ pub use writer::{write_qvd, write_qvd_file, QvdTableBuilder};
 pub use exists::{ExistsIndex, filter_rows_by_exists, filter_rows_by_exists_fast};
 pub use value::{QvdSymbol, QvdValue};
 pub use streaming::{QvdStreamReader, QvdChunk, open_qvd_stream};
+pub use concat::{concatenate, concatenate_with_schema, concatenate_with_pk, concatenate_with_pk_schema, OnConflict, SchemaMode};
 
 #[cfg(any(feature = "parquet_support", feature = "python"))]
 pub use parquet::{

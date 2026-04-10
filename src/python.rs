@@ -253,6 +253,48 @@ impl PyQvdTable {
         self.inner.normalize();
     }
 
+    /// Concatenate another QvdTable into this one (pure append, no deduplication).
+    ///
+    /// schema: "strict" (default, error on column mismatch) or "union" (fill missing with NULL)
+    ///
+    /// ```python
+    /// merged = table_a.concatenate(table_b)                    # strict
+    /// merged = table_a.concatenate(table_b, schema="union")    # allow different columns
+    /// ```
+    #[pyo3(signature = (other, schema="strict"))]
+    fn concatenate(&self, other: &PyQvdTable, schema: &str) -> PyResult<PyQvdTable> {
+        let mode = parse_schema_mode(schema)?;
+        let result = crate::concat::concatenate_with_schema(&self.inner, &other.inner, mode)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        Ok(PyQvdTable { inner: result })
+    }
+
+    /// Concatenate with primary-key deduplication.
+    ///
+    /// on_conflict: "replace" (new wins), "skip" (existing wins), "error"
+    /// schema: "strict" (default) or "union"
+    ///
+    /// ```python
+    /// merged = existing.concatenate_pk(new_rows, pk="order_id")
+    /// merged = existing.concatenate_pk(new_rows, pk=["a", "b"], on_conflict="skip", schema="union")
+    /// ```
+    #[pyo3(signature = (other, pk, on_conflict="replace", schema="strict"))]
+    fn concatenate_pk(
+        &self,
+        other: &PyQvdTable,
+        pk: &Bound<'_, PyAny>,
+        on_conflict: &str,
+        schema: &str,
+    ) -> PyResult<PyQvdTable> {
+        let pk_columns = parse_pk_arg(pk)?;
+        let pk_refs: Vec<&str> = pk_columns.iter().map(|s| s.as_str()).collect();
+        let strategy = parse_on_conflict(on_conflict)?;
+        let mode = parse_schema_mode(schema)?;
+        let result = crate::concat::concatenate_with_pk_schema(&self.inner, &other.inner, &pk_refs, strategy, mode)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        Ok(PyQvdTable { inner: result })
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "QvdTable(table='{}', rows={}, cols={})",
@@ -706,6 +748,206 @@ fn collect_qvd_files<'py>(
     Ok(())
 }
 
+// ============================================================
+// write_arrow: Arrow → QVD in one call
+// ============================================================
+
+/// Write a PyArrow RecordBatch or Table directly to a QVD file.
+///
+/// Accepts pyarrow.RecordBatch or pyarrow.Table (handles combine_chunks internally).
+///
+/// ```python
+/// qvd.write_arrow(batch, "output.qvd", table_name="sales")
+/// qvd.write_arrow(arrow_table, "output.qvd")
+/// ```
+#[pyfunction]
+#[pyo3(signature = (data, path, table_name=None))]
+fn write_arrow(
+    data: &Bound<'_, PyAny>,
+    path: &str,
+    table_name: Option<&str>,
+) -> PyResult<()> {
+    let batch = extract_record_batch(data)?;
+    crate::parquet::write_record_batch_to_qvd(&batch, table_name.unwrap_or("table"), path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))
+}
+
+/// Extract an Arrow RecordBatch from either a pyarrow.RecordBatch or pyarrow.Table.
+fn extract_record_batch(obj: &Bound<'_, PyAny>) -> PyResult<arrow::record_batch::RecordBatch> {
+    use arrow::pyarrow::FromPyArrow;
+    // Try RecordBatch first
+    if let Ok(batch) = arrow::record_batch::RecordBatch::from_pyarrow_bound(obj) {
+        return Ok(batch);
+    }
+    // Try PyArrow Table → combine_chunks → first batch
+    if obj.hasattr("to_batches")? {
+        let combined = obj.call_method0("combine_chunks")?;
+        let batches = combined.call_method0("to_batches")?;
+        let batch_list: Vec<Bound<'_, PyAny>> = batches.extract()?;
+        if batch_list.is_empty() {
+            return Err(PyValueError::new_err("Empty Arrow Table"));
+        }
+        return arrow::record_batch::RecordBatch::from_pyarrow_bound(&batch_list[0])
+            .map_err(|e| PyValueError::new_err(format!("Invalid Arrow Table: {}", e)));
+    }
+    Err(PyValueError::new_err("data must be pyarrow.RecordBatch or pyarrow.Table"))
+}
+
+// ============================================================
+// Top-level concatenate functions
+// ============================================================
+
+/// Concatenate two QVD files (pure append, no deduplication).
+///
+/// new_rows can be: str (path to .qvd), pyarrow.RecordBatch, or QvdTable.
+///
+/// ```python
+/// qvd.concatenate_qvd("existing.qvd", "new_data.qvd", "merged.qvd")
+/// qvd.concatenate_qvd("existing.qvd", arrow_batch, "merged.qvd", table_name="sales")
+/// ```
+#[pyfunction]
+#[pyo3(signature = (existing_path, new_rows, out_path, table_name=None, schema="strict"))]
+fn concatenate_qvd(
+    existing_path: &str,
+    new_rows: &Bound<'_, PyAny>,
+    out_path: &str,
+    table_name: Option<&str>,
+    schema: &str,
+) -> PyResult<()> {
+    let existing = reader::read_qvd_file(existing_path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let new_table = resolve_new_rows(new_rows, table_name)?;
+    let mode = parse_schema_mode(schema)?;
+    let mut result = crate::concat::concatenate_with_schema(&existing, &new_table, mode)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    if let Some(name) = table_name {
+        result.header.table_name = name.to_string();
+    }
+    writer::write_qvd_file(&result, out_path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))
+}
+
+/// Concatenate with primary-key deduplication.
+///
+/// ```python
+/// qvd.concatenate_pk_qvd("existing.qvd", "new.qvd", "out.qvd", pk="order_id")
+/// qvd.concatenate_pk_qvd("existing.qvd", batch, "out.qvd", pk=["a","b"], on_conflict="skip")
+/// ```
+#[pyfunction]
+#[pyo3(signature = (existing_path, new_rows, out_path, pk, on_conflict="replace", table_name=None, schema="strict"))]
+fn concatenate_pk_qvd(
+    existing_path: &str,
+    new_rows: &Bound<'_, PyAny>,
+    out_path: &str,
+    pk: &Bound<'_, PyAny>,
+    on_conflict: &str,
+    table_name: Option<&str>,
+    schema: &str,
+) -> PyResult<()> {
+    let existing = reader::read_qvd_file(existing_path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let new_table = resolve_new_rows(new_rows, table_name)?;
+    let pk_columns = parse_pk_arg(pk)?;
+    let pk_refs: Vec<&str> = pk_columns.iter().map(|s| s.as_str()).collect();
+    let strategy = parse_on_conflict(on_conflict)?;
+    let mode = parse_schema_mode(schema)?;
+    let mut result = crate::concat::concatenate_with_pk_schema(&existing, &new_table, &pk_refs, strategy, mode)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    if let Some(name) = table_name {
+        result.header.table_name = name.to_string();
+    }
+    writer::write_qvd_file(&result, out_path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))
+}
+
+// ============================================================
+// Helpers for Python bindings
+// ============================================================
+
+/// Resolve new_rows argument: str (qvd path), PyArrow RecordBatch, or QvdTable.
+fn resolve_new_rows(obj: &Bound<'_, PyAny>, table_name: Option<&str>) -> PyResult<reader::QvdTable> {
+    // Case 1: str → path to QVD file
+    if let Ok(path) = obj.extract::<String>() {
+        return reader::read_qvd_file(&path)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)));
+    }
+
+    // Case 2: QvdTable (our own type)
+    if let Ok(py_table) = obj.extract::<pyo3::PyRef<'_, PyQvdTable>>() {
+        // Clone the inner table
+        let inner = &py_table.inner;
+        return Ok(reader::QvdTable {
+            header: inner.header.clone(),
+            symbols: inner.symbols.clone(),
+            row_indices: inner.row_indices.clone(),
+            raw_xml: Vec::new(),
+            raw_binary: Vec::new(),
+        });
+    }
+
+    // Case 3: PyArrow RecordBatch or Table
+    // Try RecordBatch first
+    if let Ok(batch) = arrow::record_batch::RecordBatch::from_pyarrow_bound(obj) {
+        return crate::parquet::record_batch_to_qvd(&batch, table_name.unwrap_or("table"))
+            .map_err(|e| PyValueError::new_err(format!("{}", e)));
+    }
+
+    // Try PyArrow Table → combine_chunks → to_batches → first batch
+    if obj.hasattr("to_batches")? {
+        let combined = obj.call_method0("combine_chunks")?;
+        let batches = combined.call_method0("to_batches")?;
+        let batch_list: Vec<Bound<'_, PyAny>> = batches.extract()?;
+        if batch_list.is_empty() {
+            return Err(PyValueError::new_err("Empty Arrow Table"));
+        }
+        let batch = arrow::record_batch::RecordBatch::from_pyarrow_bound(&batch_list[0])
+            .map_err(|e| PyValueError::new_err(format!("Invalid Arrow Table: {}", e)))?;
+        return crate::parquet::record_batch_to_qvd(&batch, table_name.unwrap_or("table"))
+            .map_err(|e| PyValueError::new_err(format!("{}", e)));
+    }
+
+    Err(PyValueError::new_err(
+        "new_rows must be: str (QVD path), pyarrow.RecordBatch, pyarrow.Table, or QvdTable"
+    ))
+}
+
+/// Parse pk argument: str or list[str].
+fn parse_pk_arg(pk: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    if let Ok(s) = pk.extract::<String>() {
+        return Ok(vec![s]);
+    }
+    if let Ok(list) = pk.extract::<Vec<String>>() {
+        if list.is_empty() {
+            return Err(PyValueError::new_err("pk must not be empty"));
+        }
+        return Ok(list);
+    }
+    Err(PyValueError::new_err("pk must be str or list[str]"))
+}
+
+/// Parse schema mode string to enum.
+fn parse_schema_mode(s: &str) -> PyResult<crate::concat::SchemaMode> {
+    match s {
+        "strict" => Ok(crate::concat::SchemaMode::Strict),
+        "union" => Ok(crate::concat::SchemaMode::Union),
+        _ => Err(PyValueError::new_err(
+            format!("schema must be 'strict' or 'union', got '{}'", s)
+        )),
+    }
+}
+
+/// Parse on_conflict string to enum.
+fn parse_on_conflict(s: &str) -> PyResult<crate::concat::OnConflict> {
+    match s {
+        "replace" => Ok(crate::concat::OnConflict::Replace),
+        "skip" => Ok(crate::concat::OnConflict::Skip),
+        "error" => Ok(crate::concat::OnConflict::Error),
+        _ => Err(PyValueError::new_err(
+            format!("on_conflict must be 'replace', 'skip', or 'error', got '{}'", s)
+        )),
+    }
+}
+
 /// Python module definition.
 #[pymodule]
 fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -722,5 +964,8 @@ fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(register_duckdb, m)?)?;
     m.add_function(wrap_pyfunction!(register_duckdb_filtered, m)?)?;
     m.add_function(wrap_pyfunction!(register_duckdb_folder, m)?)?;
+    m.add_function(wrap_pyfunction!(write_arrow, m)?)?;
+    m.add_function(wrap_pyfunction!(concatenate_qvd, m)?)?;
+    m.add_function(wrap_pyfunction!(concatenate_pk_qvd, m)?)?;
     Ok(())
 }
