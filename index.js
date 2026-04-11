@@ -6,8 +6,14 @@ const { join } = require('path')
 const { platform, arch } = process
 
 let nativeBinding = null
-let localFileExisted = false
 let loadError = null
+
+// Try loading local development build first (napi build output)
+try {
+  nativeBinding = require(join(__dirname, 'qvdrs.node'))
+} catch {
+  // Fall through to platform-specific loading
+}
 
 function isMusl() {
   // For Node 12+
@@ -24,7 +30,7 @@ function isMusl() {
   }
 }
 
-switch (platform) {
+if (!nativeBinding) switch (platform) {
   case 'win32':
     switch (arch) {
       case 'x64':
