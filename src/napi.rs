@@ -54,7 +54,7 @@ pub struct JsQvdTable {
 
 #[napi]
 impl JsQvdTable {
-    /// Number of rows.
+    /// Number of rows (safe for QVD files — Qlik limits tables to ~2B rows).
     #[napi(getter)]
     pub fn num_rows(&self) -> u32 {
         self.inner.num_rows() as u32

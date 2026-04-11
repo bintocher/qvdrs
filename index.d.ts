@@ -48,7 +48,7 @@ export class JsQvdTable {
    * @param other - Table to append
    * @param schema - "strict" (default) or "union"
    */
-  concatenate(other: JsQvdTable, schema?: string): JsQvdTable
+  concatenate(other: JsQvdTable, schema?: 'strict' | 'union'): JsQvdTable
 
   /**
    * Concatenate with PK-based deduplication.
@@ -60,8 +60,8 @@ export class JsQvdTable {
   concatenatePk(
     other: JsQvdTable,
     pk: string[],
-    onConflict?: string,
-    schema?: string,
+    onConflict?: 'replace' | 'skip' | 'error',
+    schema?: 'strict' | 'union',
   ): JsQvdTable
 }
 
@@ -69,6 +69,8 @@ export class JsQvdTable {
 export class JsExistsIndex {
   /** Number of unique values in the index. */
   get len(): number
+  /** Whether the index is empty. */
+  get isEmpty(): boolean
 
   /** Build from a QvdTable column. */
   static fromColumn(table: JsQvdTable, colName: string): JsExistsIndex
@@ -116,7 +118,7 @@ export function concatenateQvd(
   pathA: string,
   pathB: string,
   outputPath: string,
-  schema?: string,
+  schema?: 'strict' | 'union',
 ): Promise<void>
 
 /**
@@ -133,8 +135,8 @@ export function concatenatePkQvd(
   pathB: string,
   outputPath: string,
   pk: string[],
-  onConflict?: string,
-  schema?: string,
+  onConflict?: 'replace' | 'skip' | 'error',
+  schema?: 'strict' | 'union',
 ): Promise<void>
 
 // ── Sync functions (block event loop — for scripts/CLI) ──
