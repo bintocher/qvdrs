@@ -1,0 +1,59 @@
+{
+  "name": "qvdrs",
+  "version": "0.7.0",
+  "description": "High-performance Qlik QVD file reader/writer — Rust-powered Node.js bindings",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "qvdrs",
+    "triples": {
+      "defaults": false,
+      "additional": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin"
+      ]
+    }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bintocher/qvdrs"
+  },
+  "homepage": "https://github.com/bintocher/qvdrs",
+  "keywords": [
+    "qvd",
+    "qlik",
+    "qlik-sense",
+    "parquet",
+    "arrow",
+    "etl",
+    "data",
+    "napi-rs",
+    "rust"
+  ],
+  "author": "Stanislav Chernov <bintocher@yandex.com>",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "engines": {
+    "node": ">= 22"
+  },
+  "optionalDependencies": {
+    "qvdrs-win32-x64-msvc": "0.7.0",
+    "qvdrs-linux-x64-gnu": "0.7.0",
+    "qvdrs-linux-arm64-gnu": "0.7.0",
+    "qvdrs-darwin-x64": "0.7.0",
+    "qvdrs-darwin-arm64": "0.7.0"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "scripts": {
+    "build": "napi build --features napi_support --release",
+    "build:debug": "napi build --features napi_support"
+  }
+}

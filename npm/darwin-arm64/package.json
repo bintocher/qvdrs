@@ -1,0 +1,13 @@
+{
+  "name": "qvdrs-darwin-arm64",
+  "version": "0.7.0",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "main": "qvdrs.darwin-arm64.node",
+  "files": ["qvdrs.darwin-arm64.node"],
+  "description": "macOS arm64 (Apple Silicon) native binary for qvdrs",
+  "license": "MIT",
+  "engines": {
+    "node": ">= 22"
+  }
+}

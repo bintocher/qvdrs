@@ -47,16 +47,42 @@
 | `qvd.convert_parquet_to_qvd(src, dst)` | Parquet -> QVD |
 | `qvd.convert_qvd_to_parquet(src, dst, compression)` | QVD -> Parquet |
 
+## TypeScript / Node.js
+
+| Function / Method | Description |
+|---|---|
+| `readQvd(path)` | Read QVD file (async, returns Promise) |
+| `readQvdSync(path)` | Read QVD file (sync) |
+| `saveQvd(table, path)` | Write QVD to file (async) |
+| `saveQvdSync(table, path)` | Write QVD to file (sync) |
+| `readQvdFiltered(path, col, values, ...)` | Streaming filtered read (async) |
+| `JsQvdTable.get(row, col)` | Get cell by index |
+| `JsQvdTable.getByName(row, colName)` | Get cell by column name |
+| `JsQvdTable.columnValues(col)` | Get column values by index |
+| `JsQvdTable.columnValuesByName(colName)` | Get column values by name |
+| `JsQvdTable.toJson()` | Convert to array of objects |
+| `JsQvdTable.head(n?)` | First N rows as objects |
+| `JsQvdTable.filterByValues(col, values)` | Filter rows by matching values |
+| `JsQvdTable.subsetRows(indices)` | Subset by row indices |
+| `JsQvdTable.normalize()` | Normalize for Qlik compatibility |
+| `JsQvdTable.concatenate(other, schema?)` | Append (schema: "strict" / "union") |
+| `JsQvdTable.concatenatePk(other, pk, ...)` | PK merge |
+| `concatenateQvd(a, b, out, schema?)` | File-level append (async) |
+| `concatenatePkQvd(a, b, out, pk, ...)` | File-level PK merge (async) |
+| `JsExistsIndex.fromColumn(table, col)` | Build EXISTS index from column |
+| `JsExistsIndex.fromValues(values)` | Build EXISTS index from values |
+| `filterExists(table, col, index)` | Filter rows by EXISTS index |
+
 ## Enums
 
-### SchemaMode (Rust) / schema parameter (Python)
+### SchemaMode (Rust) / schema parameter (Python/TypeScript)
 
 | Value | Description |
 |---|---|
 | `Strict` / `"strict"` | Error if column names differ (default) |
 | `Union` / `"union"` | Fill missing columns with NULL (Qlik CONCATENATE behavior) |
 
-### OnConflict (Rust) / on_conflict parameter (Python)
+### OnConflict (Rust) / on_conflict parameter (Python/TypeScript)
 
 | Value | Description |
 |---|---|
@@ -86,6 +112,7 @@ Tested on 399 real QVD files (11 KB -- 2.8 GB), all byte-identical roundtrip (MD
 | `datafusion_support` | + datafusion, tokio | SQL queries via DataFusion |
 | `cli` | + clap | CLI binary |
 | `python` | + pyo3, arrow/pyarrow | Python bindings |
+| `napi_support` | + napi, napi-derive, serde_json | Node.js/TypeScript bindings |
 
 ## Architecture
 
@@ -100,5 +127,6 @@ src/
 ├── parquet.rs    — Parquet/Arrow <-> QVD (optional)
 ├── datafusion.rs — DataFusion TableProvider (optional)
 ├── python.rs     — PyO3 bindings (optional)
+├── napi.rs       — napi-rs Node.js bindings (optional)
 └── bin/qvd.rs    — CLI binary (optional)
 ```

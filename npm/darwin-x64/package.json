@@ -1,0 +1,13 @@
+{
+  "name": "qvdrs-darwin-x64",
+  "version": "0.7.0",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "main": "qvdrs.darwin-x64.node",
+  "files": ["qvdrs.darwin-x64.node"],
+  "description": "macOS x64 native binary for qvdrs",
+  "license": "MIT",
+  "engines": {
+    "node": ">= 22"
+  }
+}
