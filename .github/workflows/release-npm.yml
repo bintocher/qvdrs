@@ -85,8 +85,8 @@ jobs:
           done
           ls -la *.node
 
-      - name: Publish platform packages
-        run: npx napi prepublish --skip-gh-release
+      - name: Prepare platform packages
+        run: npx napi pre-publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
