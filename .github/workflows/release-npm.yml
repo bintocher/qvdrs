@@ -78,22 +78,33 @@ jobs:
         with:
           path: artifacts
 
-      - name: Move artifacts to project root
+      - name: Move artifacts to platform packages
         run: |
+          # Map Rust target triples to npm directory names
+          declare -A TARGET_MAP=(
+            ["x86_64-pc-windows-msvc"]="win32-x64-msvc"
+            ["x86_64-unknown-linux-gnu"]="linux-x64-gnu"
+            ["aarch64-unknown-linux-gnu"]="linux-arm64-gnu"
+            ["x86_64-apple-darwin"]="darwin-x64"
+            ["aarch64-apple-darwin"]="darwin-arm64"
+          )
           for dir in artifacts/bindings-*/; do
-            cp "$dir"*.node . 2>/dev/null || true
+            target=$(basename "$dir" | sed 's/bindings-//')
+            npm_dir=${TARGET_MAP[$target]}
+            if [ -n "$npm_dir" ]; then
+              for f in "$dir"*.node; do
+                dest_name="qvdrs.${npm_dir}.node"
+                cp "$f" "npm/${npm_dir}/${dest_name}"
+                echo "Copied $f -> npm/${npm_dir}/${dest_name}"
+              done
+            fi
           done
-          ls -la *.node
-
-      - name: Prepare platform packages
-        run: npx napi pre-publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          ls -la npm/*/*.node
 
       - name: Publish platform packages to npm
         run: |
           for dir in npm/*/; do
-            if [ -f "$dir/package.json" ]; then
+            if [ -f "$dir/package.json" ] && ls "$dir"*.node 1>/dev/null 2>&1; then
               cd "$dir"
               npm publish --access public || true
               cd ../..
