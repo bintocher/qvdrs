@@ -1,0 +1,13 @@
+{
+  "name": "qvdrs-linux-x64-gnu",
+  "version": "0.7.0",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "main": "qvdrs.linux-x64-gnu.node",
+  "files": ["qvdrs.linux-x64-gnu.node"],
+  "description": "Linux x64 native binary for qvdrs",
+  "license": "MIT",
+  "engines": {
+    "node": ">= 22"
+  }
+}

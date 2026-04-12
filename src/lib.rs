@@ -19,6 +19,7 @@
 //!   First QVD library in any language with PK-based merge
 //! - **write_arrow** — write PyArrow RecordBatch/Table directly to QVD (no Parquet roundtrip)
 //! - **Python bindings** — PyArrow, pandas, Polars via zero-copy Arrow bridge
+//! - **Node.js / TypeScript bindings** — native napi-rs bindings with async I/O
 //! - **Zero dependencies** for core read/write (Parquet/Arrow/DataFusion are optional)
 //!
 //! ## Quick Start
@@ -130,6 +131,7 @@
 //! | `datafusion_support` | + datafusion, tokio | SQL queries on QVD via DataFusion |
 //! | `cli` | + clap | CLI binary `qvd-cli` |
 //! | `python` | + pyo3, arrow/pyarrow | Python bindings with PyArrow/pandas/Polars |
+//! | `napi_support` | + napi, napi-derive | Node.js/TypeScript bindings |
 
 /// Error types for QVD operations.
 pub mod error;
@@ -166,6 +168,10 @@ pub mod datafusion;
 #[cfg(feature = "python")]
 #[doc(hidden)]
 pub mod python;
+
+#[cfg(feature = "napi_support")]
+#[doc(hidden)]
+pub mod napi;
 
 pub use error::{QvdError, QvdResult};
 pub use header::QvdTableHeader;

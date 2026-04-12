@@ -11,7 +11,7 @@ use crate::value::{QvdSymbol, QvdValue};
 /// Use [`read_qvd_file`] to load from disk, then access data via [`get`](QvdTable::get),
 /// [`column_strings`](QvdTable::column_strings), or convert to Arrow with
 /// [`qvd_to_record_batch`](crate::parquet::qvd_to_record_batch) (feature `parquet_support`).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QvdTable {
     pub header: QvdTableHeader,
     /// Columns of symbol tables: symbols[col_idx][symbol_idx]

@@ -2,6 +2,38 @@
 
 ---
 
+## v0.7.0
+
+### New Features
+
+- **Node.js / TypeScript bindings** via napi-rs — native Rust performance in JavaScript. All I/O operations are async (run on libuv thread pool, never block the event loop). Sync variants available for scripts/CLI.
+  - `readQvd` / `readQvdSync` — read QVD files
+  - `saveQvd` / `saveQvdSync` — write QVD files
+  - `JsQvdTable` — full table API (get, filter, head, toJson, symbols, normalize)
+  - `JsExistsIndex` — O(1) EXISTS() lookups
+  - `readQvdFiltered` — streaming filtered reads
+  - `concatenateQvd` / `concatenatePkQvd` — file-level merge operations
+  - Requires **Node.js 22+**
+
+- **npm publishing** — CI/CD workflow for automated npm releases. Platform-specific native binaries for Windows x64, Linux x64/arm64, macOS x64/arm64.
+
+### Platforms
+
+| Package | Platform |
+|---------|----------|
+| `qvdrs` | Main package (auto-selects binary) |
+| `qvdrs-win32-x64-msvc` | Windows x64 |
+| `qvdrs-linux-x64-gnu` | Linux x64 |
+| `qvdrs-linux-arm64-gnu` | Linux arm64 |
+| `qvdrs-darwin-x64` | macOS Intel |
+| `qvdrs-darwin-arm64` | macOS Apple Silicon |
+
+### Migration
+
+No breaking changes. All new features are purely additive.
+
+---
+
 ## v0.6.2
 
 - Fix: abi3 minimum lowered from py312 to py39 — wheels now work on **Python 3.9+** (3.10, 3.11, 3.12, 3.13, 3.14)
