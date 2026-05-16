@@ -2,6 +2,38 @@
 
 ---
 
+## v0.7.1
+
+### Bug Fixes
+
+- **Python: declare `pyarrow` as a runtime dependency** ([#2](https://github.com/bintocher/qvdrs/issues/2))
+  - `pip install qvdrs` now auto-installs `pyarrow` — previously users had to discover the requirement after hitting `ModuleNotFoundError: No module named 'pyarrow'` on calls like `register_duckdb()`, `read_qvd_to_arrow()`, `read_qvd_to_pandas()`, `read_qvd_to_polars()`, etc.
+  - **Affected functions** (now work out of the box):
+    - `register_duckdb`, `register_duckdb_filtered`, `register_duckdb_folder`
+    - `read_qvd_to_arrow`, `read_qvd_to_pandas`, `read_qvd_to_polars`
+    - `QvdTable.to_arrow`, `QvdTable.from_arrow`, `QvdTable.to_pandas`, `QvdTable.to_polars`
+    - `write_arrow`
+
+### New Install Extras
+
+```bash
+pip install qvdrs               # core + Arrow (pyarrow auto-installed)
+pip install "qvdrs[pandas]"     # + pandas
+pip install "qvdrs[polars]"     # + polars
+pip install "qvdrs[duckdb]"     # + duckdb
+pip install "qvdrs[all]"        # everything
+```
+
+### CI
+
+- Added end-to-end Python smoke test that installs the built wheel into a clean venv and calls `register_duckdb()` against a real QVD file — this regression class is now caught before publish.
+
+### Migration
+
+No breaking changes. Existing code continues to work without modification.
+
+---
+
 ## v0.7.0
 
 ### New Features
