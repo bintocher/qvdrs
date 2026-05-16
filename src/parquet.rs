@@ -109,7 +109,7 @@ pub fn read_parquet_to_qvd(path: &str) -> QvdResult<QvdTable> {
         .filter(|(_, f)| f.bit_width > 0)
         .map(|(i, f)| (i, f.bit_width))
         .collect();
-    sortable.sort_by(|a, b| b.1.cmp(&a.1));
+    sortable.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     let mut current_bit_offset = 0usize;
     for (idx, _) in &sortable {
@@ -1043,7 +1043,7 @@ pub fn record_batch_to_qvd(batch: &RecordBatch, table_name: &str) -> QvdResult<Q
         .filter(|(_, f)| f.bit_width > 0)
         .map(|(i, f)| (i, f.bit_width))
         .collect();
-    sortable.sort_by(|a, b| b.1.cmp(&a.1));
+    sortable.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     let mut current_bit_offset = 0usize;
     for (idx, _) in &sortable {
