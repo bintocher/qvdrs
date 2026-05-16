@@ -241,7 +241,7 @@ impl QvdTableBuilder {
             .filter(|(_, f)| f.bit_width > 0)
             .map(|(i, f)| (i, f.bit_width))
             .collect();
-        sortable.sort_by(|a, b| b.1.cmp(&a.1));
+        sortable.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         let mut current_bit_offset = 0usize;
         for (idx, _) in &sortable {
