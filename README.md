@@ -26,7 +26,7 @@ High-performance Rust library for reading, writing, converting and merging Qlik 
 
 ```toml
 # Cargo.toml
-qvd = "0.7.0"
+qvd = "0.7.1"
 ```
 ```rust
 let table = qvd::read_qvd_file("data.qvd")?;
@@ -34,7 +34,11 @@ qvd::write_qvd_file(&table, "copy.qvd")?;
 ```
 
 ```bash
-pip install qvdrs
+pip install qvdrs               # core + Arrow (pyarrow auto-installed)
+pip install "qvdrs[pandas]"     # + pandas
+pip install "qvdrs[polars]"     # + polars
+pip install "qvdrs[duckdb]"     # + duckdb
+pip install "qvdrs[all]"        # everything
 ```
 ```python
 import qvd

@@ -291,6 +291,39 @@ def test_duckdb(qvd_path: str):
     assert_true("duckdb sum", result[0] is not None, f"sum = {result[0]}")
 
 
+# ── Test 6b: register_duckdb (direct API, not Arrow bridge) ──────────
+
+def test_register_duckdb(qvd_path: str):
+    """Regression test for #2 — calls register_duckdb / _filtered / _folder directly,
+    so the path through pyarrow Table.from_batches is exercised end-to-end."""
+    print("\n== Test 6b: register_duckdb (direct) ==")
+    import duckdb
+    import qvd
+
+    # register_duckdb
+    conn = duckdb.connect()
+    qvd.register_duckdb(conn, "sales", qvd_path)
+    cnt = conn.sql("SELECT COUNT(*) FROM sales").fetchone()[0]
+    assert_eq("register_duckdb row count", cnt, 5)
+
+    names = [r[0] for r in conn.sql("SELECT name FROM sales WHERE score > 90 ORDER BY name").fetchall()]
+    assert_eq("register_duckdb filter", names, ["Alice", "Charlie", "Eve"])
+
+    # register_duckdb_filtered
+    idx = qvd.ExistsIndex.from_values(["1", "3", "5"])
+    qvd.register_duckdb_filtered(conn, "sales_subset", qvd_path, "id", idx)
+    cnt = conn.sql("SELECT COUNT(*) FROM sales_subset").fetchone()[0]
+    assert_eq("register_duckdb_filtered row count", cnt, 3)
+
+    # register_duckdb_folder
+    folder = os.path.dirname(qvd_path)
+    conn2 = duckdb.connect()
+    registered = qvd.register_duckdb_folder(conn2, folder, glob=os.path.basename(qvd_path))
+    assert_true("register_duckdb_folder returns list", isinstance(registered, list))
+    assert_true("register_duckdb_folder finds file", len(registered) >= 1,
+                f"expected >= 1 table, got {len(registered)}")
+
+
 # ── Test 7: ExistsIndex ──────────────────────────────────────────────
 
 def test_exists_index(qvd_path: str):
@@ -648,8 +681,10 @@ def main():
 
     if "duckdb" in imports:
         test_duckdb(qvd_path)
+        test_register_duckdb(qvd_path)
     else:
         print("\n== Test 6: DuckDB (SKIPPED — not installed) ==")
+        print("== Test 6b: register_duckdb (SKIPPED — duckdb not installed) ==")
 
     test_exists_index(qvd_path)
     test_parquet(qvd_path)

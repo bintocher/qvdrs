@@ -28,3 +28,26 @@ jobs:
           components: clippy
       - run: cargo clippy -- -D warnings
       - run: cargo clippy --features parquet_support -- -D warnings
+
+  python-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel with maturin
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin build --release --features python --out dist
+      - name: Install wheel into clean venv (only declared deps + duckdb/pandas/polars)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install dist/*.whl
+          .venv/bin/pip install duckdb pandas polars
+      - name: Run Python integration tests (regression for issue #2)
+        run: |
+          .venv/bin/python -c "import qvd; assert 'register_duckdb' in dir(qvd), 'register_duckdb missing from module'"
+          .venv/bin/python tests/test_python_integrations.py

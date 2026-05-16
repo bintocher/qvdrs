@@ -1,6 +1,6 @@
 {
   "name": "qvdrs-linux-arm64-gnu",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "os": ["linux"],
   "cpu": ["arm64"],
   "main": "qvdrs.linux-arm64-gnu.node",
