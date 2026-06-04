@@ -13,3 +13,4 @@ node_modules/
 npm/*/qvdrs.*.node
 .DS_Store
 docs/python/build/
+docs/typescript/build/

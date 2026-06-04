@@ -50,10 +50,13 @@
     "qvdrs-darwin-arm64": "0.7.1"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.0.0"
+    "@napi-rs/cli": "^3.0.0",
+    "typedoc": "^0.27.0",
+    "typescript": "^5.7.0"
   },
   "scripts": {
     "build": "napi build --features napi_support --release",
-    "build:debug": "napi build --features napi_support"
+    "build:debug": "napi build --features napi_support",
+    "docs:ts": "typedoc --options docs/typescript/typedoc.json"
   }
 }
