@@ -1,0 +1,25 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["../../index.d.ts"],
+  "tsconfig": "tsconfig.json",
+  "out": "build",
+  "name": "qvdrs",
+  "readme": "../../README.md",
+  "includeVersion": true,
+  "skipErrorChecking": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "githubPages": false,
+  "highlightLanguages": [
+    "bash",
+    "console",
+    "javascript",
+    "json",
+    "jsonc",
+    "python",
+    "rust",
+    "toml",
+    "tsx",
+    "typescript"
+  ]
+}

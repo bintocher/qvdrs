@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>qvd — API Documentation</title>
+  <meta name="description" content="API documentation for qvd: a high-performance Rust library for reading, writing, converting and merging Qlik QVD files, with Python and Node.js/TypeScript bindings." />
+  <style>
+    :root {
+      --bg: #0f1115;
+      --surface: #171a21;
+      --surface-hover: #1e222b;
+      --border: #262b36;
+      --text: #e6e8ec;
+      --muted: #9aa3b2;
+      --accent: #f26c4f;
+      --accent-soft: rgba(242, 108, 79, 0.12);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f8fa;
+        --surface: #ffffff;
+        --surface-hover: #fbfbfd;
+        --border: #e3e6eb;
+        --text: #1b1f27;
+        --muted: #5b6472;
+        --accent: #d9502f;
+        --accent-soft: rgba(217, 80, 47, 0.08);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 72px 24px 96px;
+    }
+    header { margin-bottom: 48px; }
+    h1 {
+      font-size: 2.6rem;
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+    }
+    .tagline {
+      font-size: 1.1rem;
+      color: var(--muted);
+      margin: 0 0 20px;
+      max-width: 60ch;
+    }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+    .badges img { height: 20px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 8px;
+    }
+    a.card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px 22px 20px;
+      transition: border-color .15s ease, background .15s ease, transform .15s ease;
+    }
+    a.card:hover {
+      border-color: var(--accent);
+      background: var(--surface-hover);
+      transform: translateY(-2px);
+    }
+    .card-lang {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 3px 8px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+    .card h2 {
+      font-size: 1.15rem;
+      margin: 0 0 6px;
+    }
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    .card .tool {
+      margin-top: 14px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+    footer {
+      margin-top: 56px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+    .disclaimer { margin-top: 12px; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>qvd</h1>
+      <p class="tagline">
+        High-performance Rust library for reading, writing, converting and merging
+        Qlik&nbsp;QVD files &mdash; with native Python and Node.js/TypeScript bindings.
+      </p>
+      <div class="badges">
+        <a href="https://crates.io/crates/qvd"><img alt="Crates.io" src="https://img.shields.io/crates/v/qvd.svg" /></a>
+        <a href="https://pypi.org/project/qvdrs/"><img alt="PyPI" src="https://img.shields.io/pypi/v/qvdrs.svg" /></a>
+        <a href="https://www.npmjs.com/package/qvdrs"><img alt="npm" src="https://img.shields.io/npm/v/qvdrs.svg" /></a>
+      </div>
+    </header>
+
+    <main>
+      <div class="grid">
+        <a class="card" href="rust/qvd/index.html">
+          <span class="card-lang">Rust</span>
+          <h2>Crate API &rarr;</h2>
+          <p>The core library. Reading, writing, streaming, EXISTS() indexing, concat and PK merge.</p>
+          <div class="tool">rustdoc</div>
+        </a>
+
+        <a class="card" href="python/index.html">
+          <span class="card-lang">Python</span>
+          <h2>Python API &rarr;</h2>
+          <p>The <code>qvdrs</code> package. Zero-copy Arrow bridge to pandas, Polars and DuckDB.</p>
+          <div class="tool">Sphinx</div>
+        </a>
+
+        <a class="card" href="typescript/index.html">
+          <span class="card-lang">TypeScript</span>
+          <h2>Node.js API &rarr;</h2>
+          <p>The <code>qvdrs</code> npm package. Native bindings via napi-rs with async I/O.</p>
+          <div class="tool">TypeDoc</div>
+        </a>
+      </div>
+    </main>
+
+    <footer>
+      <div>
+        <a href="https://github.com/bintocher/qvdrs">Source on GitHub</a> &middot;
+        MIT License
+      </div>
+      <p class="disclaimer">
+        <strong>Disclaimer:</strong> This project is <strong>not</strong> affiliated with
+        Qlik Technologies or QlikTech. QVD is a proprietary format; all trademarks belong to Qlik.
+        This library was built from scratch using publicly available information.
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

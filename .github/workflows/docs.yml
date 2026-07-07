@@ -1,0 +1,93 @@
+name: Docs
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+# Only read access is needed to build; the deploy job requests its own
+# elevated permissions below.
+permissions:
+  contents: read
+
+# Never run two Pages deployments at once; let an in-flight one finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # --- Rust (rustdoc) -------------------------------------------------
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Rust docs
+        run: cargo doc --no-deps --features cli
+      - name: Stage Rust docs
+        run: |
+          mkdir -p _site/rust
+          cp -r target/doc/. _site/rust/
+          # target/doc has no index.html at its root; redirect to the crate.
+          printf '<!DOCTYPE html><meta http-equiv="refresh" content="0; url=qvd/index.html">\n' > _site/rust/index.html
+
+      # --- Python (Sphinx) ------------------------------------------------
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build Python docs
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install --upgrade pip maturin
+          pip install -r docs/python/requirements.txt
+          # Install the compiled PyO3 module so autodoc can import `qvd`.
+          maturin develop --features python
+          sphinx-build -M html docs/python/source docs/python/build
+      - name: Stage Python docs
+        run: |
+          mkdir -p _site/python
+          cp -r docs/python/build/html/. _site/python/
+
+      # --- TypeScript (TypeDoc) -------------------------------------------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build TypeScript docs
+        run: |
+          npm ci
+          npm run docs:ts
+      - name: Stage TypeScript docs
+        run: |
+          mkdir -p _site/typescript
+          cp -r docs/typescript/build/. _site/typescript/
+
+      # --- Landing page ---------------------------------------------------
+      - name: Stage landing page
+        run: cp docs/index.html _site/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    # PRs build the docs (to catch breakage) but never deploy. Deployment
+    # happens on published releases and manual runs, on a repo where Pages
+    # is enabled.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

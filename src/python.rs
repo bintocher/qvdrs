@@ -9,7 +9,11 @@ use arrow::record_batch::RecordBatch;
 use crate::reader;
 use crate::writer;
 
-/// Python wrapper around QvdTable.
+/// In-memory representation of a QVD file.
+///
+/// Loaded via :func:`read_qvd` or :meth:`QvdTable.load`, persisted via
+/// :meth:`save`, and interoperable with PyArrow, pandas, Polars and Parquet
+/// through the conversion methods on this class.
 #[pyclass(name = "QvdTable")]
 pub struct PyQvdTable {
     inner: reader::QvdTable,
@@ -18,6 +22,18 @@ pub struct PyQvdTable {
 #[pymethods]
 impl PyQvdTable {
     /// Read a QVD file from disk.
+    ///
+    /// Args:
+    ///     path (str): Path to the ``.qvd`` file.
+    ///
+    /// Returns:
+    ///     QvdTable: Loaded table.
+    ///
+    /// Raises:
+    ///     ValueError: If the file cannot be opened or is not a valid QVD.
+    ///
+    /// Example:
+    ///     >>> table = QvdTable.load("data.qvd")
     #[staticmethod]
     fn load(path: &str) -> PyResult<Self> {
         let table = reader::read_qvd_file(path)
@@ -25,37 +41,68 @@ impl PyQvdTable {
         Ok(PyQvdTable { inner: table })
     }
 
-    /// Save the QVD table to a file (byte-identical roundtrip if unmodified).
+    /// Save the table back to a QVD file.
+    ///
+    /// If the table has not been modified since loading, the output is a
+    /// byte-identical roundtrip of the source file.
+    ///
+    /// Args:
+    ///     path (str): Destination path for the ``.qvd`` file.
+    ///
+    /// Raises:
+    ///     ValueError: If the file cannot be written.
     fn save(&self, path: &str) -> PyResult<()> {
         writer::write_qvd_file(&self.inner, path)
             .map_err(|e| PyValueError::new_err(format!("{}", e)))
     }
 
-    /// Table name from metadata.
+    /// Table name as stored in the QVD header metadata.
+    ///
+    /// Returns:
+    ///     str: Table name.
     #[getter]
     fn table_name(&self) -> &str {
         &self.inner.header.table_name
     }
 
-    /// Number of rows.
+    /// Number of rows in the table.
+    ///
+    /// Returns:
+    ///     int: Row count.
     #[getter]
     fn num_rows(&self) -> usize {
         self.inner.num_rows()
     }
 
-    /// Number of columns.
+    /// Number of columns in the table.
+    ///
+    /// Returns:
+    ///     int: Column count.
     #[getter]
     fn num_cols(&self) -> usize {
         self.inner.num_cols()
     }
 
-    /// Column names as a list of strings.
+    /// Column names in declaration order.
+    ///
+    /// Returns:
+    ///     list[str]: Column names.
     #[getter]
     fn columns(&self) -> Vec<String> {
         self.inner.header.fields.iter().map(|f| f.field_name.clone()).collect()
     }
 
     /// Get a single cell value by row and column index.
+    ///
+    /// Args:
+    ///     row (int): Zero-based row index.
+    ///     col (int): Zero-based column index.
+    ///
+    /// Returns:
+    ///     str | None: Cell value as string, or ``None`` for NULL.
+    ///
+    /// Raises:
+    ///     ValueError: If ``row`` or ``col`` is out of bounds.
     fn get(&self, row: usize, col: usize) -> PyResult<Option<String>> {
         if row >= self.inner.num_rows() || col >= self.inner.num_cols() {
             return Err(PyValueError::new_err("Index out of bounds"));
@@ -64,6 +111,16 @@ impl PyQvdTable {
     }
 
     /// Get a single cell value by row index and column name.
+    ///
+    /// Args:
+    ///     row (int): Zero-based row index.
+    ///     col_name (str): Column name.
+    ///
+    /// Returns:
+    ///     str | None: Cell value as string, or ``None`` for NULL.
+    ///
+    /// Raises:
+    ///     ValueError: If ``col_name`` does not exist in the table.
     fn get_by_name(&self, row: usize, col_name: &str) -> PyResult<Option<String>> {
         match self.inner.get_by_name(row, col_name) {
             Some(val) => Ok(val.as_string()),
@@ -71,7 +128,16 @@ impl PyQvdTable {
         }
     }
 
-    /// Get all values of a column as a list of strings (None for NULL).
+    /// Get all values of a column by index.
+    ///
+    /// Args:
+    ///     col (int): Zero-based column index.
+    ///
+    /// Returns:
+    ///     list[str | None]: Column values, with ``None`` for NULL.
+    ///
+    /// Raises:
+    ///     ValueError: If ``col`` is out of bounds.
     fn column_values(&self, col: usize) -> PyResult<Vec<Option<String>>> {
         if col >= self.inner.num_cols() {
             return Err(PyValueError::new_err("Column index out of bounds"));
@@ -80,6 +146,15 @@ impl PyQvdTable {
     }
 
     /// Get all values of a column by name.
+    ///
+    /// Args:
+    ///     col_name (str): Column name.
+    ///
+    /// Returns:
+    ///     list[str | None]: Column values, with ``None`` for NULL.
+    ///
+    /// Raises:
+    ///     ValueError: If ``col_name`` does not exist in the table.
     fn column_values_by_name(&self, col_name: &str) -> PyResult<Vec<Option<String>>> {
         let col = self.inner.header.fields.iter()
             .position(|f| f.field_name == col_name)
@@ -87,7 +162,10 @@ impl PyQvdTable {
         Ok(self.inner.column_strings(col))
     }
 
-    /// Convert to a Python dict of {column_name: [values...]}.
+    /// Convert the table to a column-oriented ``dict``.
+    ///
+    /// Returns:
+    ///     dict[str, list[str | None]]: Mapping ``column_name -> list of values``.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
         for (col_idx, field) in self.inner.header.fields.iter().enumerate() {
@@ -98,7 +176,16 @@ impl PyQvdTable {
         Ok(dict)
     }
 
-    /// Get unique symbols (distinct values) for a column.
+    /// Get the unique symbols (distinct values) of a column.
+    ///
+    /// Args:
+    ///     col_name (str): Column name.
+    ///
+    /// Returns:
+    ///     list[str]: Distinct symbol values, in QVD storage order.
+    ///
+    /// Raises:
+    ///     ValueError: If ``col_name`` does not exist in the table.
     fn symbols(&self, col_name: &str) -> PyResult<Vec<String>> {
         let col = self.inner.header.fields.iter()
             .position(|f| f.field_name == col_name)
@@ -107,6 +194,15 @@ impl PyQvdTable {
     }
 
     /// Number of unique values (symbols) in a column.
+    ///
+    /// Args:
+    ///     col_name (str): Column name.
+    ///
+    /// Returns:
+    ///     int: Distinct symbol count.
+    ///
+    /// Raises:
+    ///     ValueError: If ``col_name`` does not exist in the table.
     fn num_symbols(&self, col_name: &str) -> PyResult<usize> {
         let col = self.inner.header.fields.iter()
             .position(|f| f.field_name == col_name)
@@ -114,7 +210,14 @@ impl PyQvdTable {
         Ok(self.inner.symbols[col].len())
     }
 
-    /// Get first N rows as a list of dicts.
+    /// Return the first ``n`` rows as a list of ``dict``s.
+    ///
+    /// Args:
+    ///     n (int, optional): Number of rows to return. Default is 10. Capped at
+    ///         the table's row count.
+    ///
+    /// Returns:
+    ///     list[dict[str, str | None]]: One dict per row, keyed by column name.
     #[pyo3(signature = (n=None))]
     fn head<'a>(&self, py: Python<'a>, n: Option<usize>) -> PyResult<Bound<'a, PyList>> {
         let n = n.unwrap_or(10).min(self.inner.num_rows());
@@ -130,7 +233,16 @@ impl PyQvdTable {
         Ok(rows)
     }
 
-    /// Load a Parquet file and convert it to a QvdTable in memory.
+    /// Load a Parquet file and convert it to a :class:`QvdTable` in memory.
+    ///
+    /// Args:
+    ///     path (str): Path to the Parquet file.
+    ///
+    /// Returns:
+    ///     QvdTable: Loaded table.
+    ///
+    /// Raises:
+    ///     ValueError: If the file cannot be read or has an unsupported schema.
     #[staticmethod]
     fn from_parquet(path: &str) -> PyResult<Self> {
         let table = crate::parquet::read_parquet_to_qvd(path)
@@ -138,8 +250,15 @@ impl PyQvdTable {
         Ok(PyQvdTable { inner: table })
     }
 
-    /// Save this QvdTable as a Parquet file.
-    /// compression: "none", "snappy", "gzip", "lz4", "zstd" (default: "snappy")
+    /// Save this table as a Parquet file.
+    ///
+    /// Args:
+    ///     path (str): Destination ``.parquet`` path.
+    ///     compression (Literal["none", "snappy", "gzip", "lz4", "zstd"], optional):
+    ///         Compression codec. Default is ``"snappy"``.
+    ///
+    /// Raises:
+    ///     ValueError: If the codec name is invalid or the file cannot be written.
     #[pyo3(signature = (path, compression=None))]
     fn save_as_parquet(&self, path: &str, compression: Option<&str>) -> PyResult<()> {
         let comp = crate::parquet::ParquetCompression::parse(compression.unwrap_or("snappy"))
@@ -148,26 +267,42 @@ impl PyQvdTable {
             .map_err(|e| PyValueError::new_err(format!("{}", e)))
     }
 
-    /// Convert to a PyArrow RecordBatch (zero-copy via Arrow C Data Interface).
+    /// Convert to a PyArrow ``RecordBatch`` (zero-copy via Arrow C Data Interface).
     ///
-    /// Requires `pyarrow` to be installed.
+    /// Requires ``pyarrow`` to be installed.
     ///
-    /// ```python
-    /// table = qvd.read_qvd("data.qvd")
-    /// batch = table.to_arrow()
-    /// ```
+    /// Returns:
+    ///     pyarrow.RecordBatch: Arrow representation of the table.
+    ///
+    /// Raises:
+    ///     ValueError: If the table cannot be converted to Arrow.
+    ///
+    /// Example:
+    ///     >>> table = qvd.read_qvd("data.qvd")
+    ///     >>> batch = table.to_arrow()
     fn to_arrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let batch = crate::parquet::qvd_to_record_batch(&self.inner)
             .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
         batch.to_pyarrow(py)
     }
 
-    /// Create a QvdTable from a PyArrow RecordBatch.
+    /// Create a :class:`QvdTable` from a PyArrow ``RecordBatch``.
     ///
-    /// ```python
-    /// table = qvd.QvdTable.from_arrow(batch, table_name="my_table")
-    /// table.save("output.qvd")
-    /// ```
+    /// Args:
+    ///     batch (pyarrow.RecordBatch): Source Arrow batch.
+    ///     table_name (str, optional): Name to store in the QVD header. Default is
+    ///         ``"table"``.
+    ///
+    /// Returns:
+    ///     QvdTable: New table backed by the Arrow data.
+    ///
+    /// Raises:
+    ///     ValueError: If the input is not a valid ``RecordBatch`` or contains
+    ///         unsupported types.
+    ///
+    /// Example:
+    ///     >>> table = qvd.QvdTable.from_arrow(batch, table_name="my_table")
+    ///     >>> table.save("output.qvd")
     #[staticmethod]
     #[pyo3(signature = (batch, table_name=None))]
     fn from_arrow(batch: &Bound<'_, PyAny>, table_name: Option<&str>) -> PyResult<Self> {
@@ -178,13 +313,19 @@ impl PyQvdTable {
         Ok(PyQvdTable { inner: table })
     }
 
-    /// Convert to a pandas DataFrame.
+    /// Convert to a pandas ``DataFrame``.
     ///
-    /// Requires `pyarrow` and `pandas` to be installed.
+    /// Requires ``pyarrow`` and ``pandas`` to be installed.
     ///
-    /// ```python
-    /// df = qvd.read_qvd("data.qvd").to_pandas()
-    /// ```
+    /// Returns:
+    ///     pandas.DataFrame: Table contents as a pandas frame.
+    ///
+    /// Raises:
+    ///     ImportError: If ``pyarrow`` is not installed.
+    ///     ValueError: If conversion to Arrow fails.
+    ///
+    /// Example:
+    ///     >>> df = qvd.read_qvd("data.qvd").to_pandas()
     fn to_pandas<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let batch = crate::parquet::qvd_to_record_batch(&self.inner)
             .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
@@ -197,13 +338,19 @@ impl PyQvdTable {
         Ok(df)
     }
 
-    /// Convert to a Polars DataFrame.
+    /// Convert to a Polars ``DataFrame``.
     ///
-    /// Requires `pyarrow` and `polars` to be installed.
+    /// Requires ``pyarrow`` and ``polars`` to be installed.
     ///
-    /// ```python
-    /// df = qvd.read_qvd("data.qvd").to_polars()
-    /// ```
+    /// Returns:
+    ///     polars.DataFrame: Table contents as a Polars frame.
+    ///
+    /// Raises:
+    ///     ImportError: If ``pyarrow`` or ``polars`` is not installed.
+    ///     ValueError: If conversion to Arrow fails.
+    ///
+    /// Example:
+    ///     >>> df = qvd.read_qvd("data.qvd").to_polars()
     fn to_polars<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let batch = crate::parquet::qvd_to_record_batch(&self.inner)
             .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
@@ -218,12 +365,18 @@ impl PyQvdTable {
         Ok(df)
     }
 
-    /// Filter rows where column matches any of the given values.
-    /// Returns a new QvdTable with only matching rows.
+    /// Filter rows where a column value matches any of the given values.
     ///
-    /// ```python
-    /// filtered = table.filter_by_values("%Action_ID", ["7", "9"])
-    /// ```
+    /// Args:
+    ///     col_name (str): Column to filter on.
+    ///     values (list[str]): Values that should be kept.
+    ///
+    /// Returns:
+    ///     QvdTable: New table containing only the matching rows. The original
+    ///     table is not modified.
+    ///
+    /// Example:
+    ///     >>> filtered = table.filter_by_values("%Action_ID", ["7", "9"])
     fn filter_by_values(&self, col_name: &str, values: Vec<String>) -> PyResult<PyQvdTable> {
         let refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
         let matching = self.inner.filter_by_values(col_name, &refs);
@@ -236,31 +389,50 @@ impl PyQvdTable {
         Ok(PyQvdTable { inner: filtered })
     }
 
-    /// Create a new QvdTable from a subset of row indices.
+    /// Create a new table from a subset of row indices.
     ///
-    /// ```python
-    /// rows = qvd.filter_exists(table, "ClientID", idx)
-    /// subset = table.subset_rows(rows)
-    /// ```
+    /// Args:
+    ///     row_indices (list[int]): Zero-based row indices to keep, in the desired
+    ///         output order. Indices may be repeated.
+    ///
+    /// Returns:
+    ///     QvdTable: New table containing only the selected rows.
+    ///
+    /// Example:
+    ///     >>> rows = qvd.filter_exists(table, "ClientID", idx)
+    ///     >>> subset = table.subset_rows(rows)
     fn subset_rows(&self, row_indices: Vec<usize>) -> PyResult<PyQvdTable> {
         let filtered = self.inner.subset_rows(&row_indices);
         Ok(PyQvdTable { inner: filtered })
     }
 
     /// Normalize the table for maximum Qlik Sense compatibility.
-    /// Converts DualInt→Int, DualDouble→Double, sets proper NumberFormat/Tags/BitWidth.
+    ///
+    /// Converts ``DualInt`` → ``Int`` and ``DualDouble`` → ``Double`` and sets
+    /// proper ``NumberFormat``, ``Tags`` and ``BitWidth`` on each field. Modifies
+    /// the table in place.
     fn normalize(&mut self) {
         self.inner.normalize();
     }
 
-    /// Concatenate another QvdTable into this one (pure append, no deduplication).
+    /// Concatenate another table into this one (pure append, no deduplication).
     ///
-    /// schema: "strict" (default, error on column mismatch) or "union" (fill missing with NULL)
+    /// Args:
+    ///     other (QvdTable): Table whose rows are appended.
+    ///     schema (Literal["strict", "union"]): ``"strict"`` errors on column
+    ///         mismatch, ``"union"`` fills missing columns with NULL. Default is
+    ///         ``"strict"``.
     ///
-    /// ```python
-    /// merged = table_a.concatenate(table_b)                    # strict
-    /// merged = table_a.concatenate(table_b, schema="union")    # allow different columns
-    /// ```
+    /// Returns:
+    ///     QvdTable: New merged table. Inputs are not modified.
+    ///
+    /// Raises:
+    ///     ValueError: On invalid ``schema`` value or column mismatch under
+    ///         ``"strict"``.
+    ///
+    /// Example:
+    ///     >>> merged = table_a.concatenate(table_b)
+    ///     >>> merged_union = table_a.concatenate(table_b, schema="union")
     #[pyo3(signature = (other, schema="strict"))]
     fn concatenate(&self, other: &PyQvdTable, schema: &str) -> PyResult<PyQvdTable> {
         let mode = parse_schema_mode(schema)?;
@@ -269,15 +441,31 @@ impl PyQvdTable {
         Ok(PyQvdTable { inner: result })
     }
 
-    /// Concatenate with primary-key deduplication.
+    /// Concatenate another table with primary-key deduplication.
     ///
-    /// on_conflict: "replace" (new wins), "skip" (existing wins), "error"
-    /// schema: "strict" (default) or "union"
+    /// Args:
+    ///     other (QvdTable): Table whose rows are appended.
+    ///     pk (str | list[str]): Primary-key column, or list of columns for a
+    ///         composite key.
+    ///     on_conflict (Literal["replace", "skip", "error"]): Behaviour when a PK
+    ///         collision is detected. ``"replace"`` lets new rows win, ``"skip"``
+    ///         keeps existing rows, ``"error"`` raises. Default is ``"replace"``.
+    ///     schema (Literal["strict", "union"]): ``"strict"`` errors on column
+    ///         mismatch, ``"union"`` fills missing columns with NULL. Default is
+    ///         ``"strict"``.
     ///
-    /// ```python
-    /// merged = existing.concatenate_pk(new_rows, pk="order_id")
-    /// merged = existing.concatenate_pk(new_rows, pk=["a", "b"], on_conflict="skip", schema="union")
-    /// ```
+    /// Returns:
+    ///     QvdTable: New merged table. Inputs are not modified.
+    ///
+    /// Raises:
+    ///     ValueError: On invalid ``on_conflict``/``schema`` values, missing PK
+    ///         column, or PK collision when ``on_conflict="error"``.
+    ///
+    /// Example:
+    ///     >>> merged = existing.concatenate_pk(new_rows, pk="order_id")
+    ///     >>> merged = existing.concatenate_pk(
+    ///     ...     new_rows, pk=["a", "b"], on_conflict="skip", schema="union",
+    ///     ... )
     #[pyo3(signature = (other, pk, on_conflict="replace", schema="strict"))]
     fn concatenate_pk(
         &self,
@@ -309,7 +497,12 @@ impl PyQvdTable {
     }
 }
 
-/// Python wrapper around ExistsIndex for fast O(1) lookups.
+/// Fast O(1) lookup index over a set of string values.
+///
+/// Used by :func:`filter_exists` and by the streaming entry points
+/// :func:`read_qvd_filtered` and :func:`register_duckdb_filtered`. Build either
+/// from a :class:`QvdTable` column (``ExistsIndex(table, col_name)``) or from an
+/// explicit list (:meth:`ExistsIndex.from_values`).
 #[pyclass(name = "ExistsIndex")]
 pub struct PyExistsIndex {
     values: HashSet<String>,
@@ -318,11 +511,17 @@ pub struct PyExistsIndex {
 
 #[pymethods]
 impl PyExistsIndex {
-    /// Build an ExistsIndex from a QvdTable column.
+    /// Build an :class:`ExistsIndex` from a :class:`QvdTable` column.
     ///
-    /// ```python
-    /// idx = qvd.ExistsIndex(table, "ClientID")
-    /// ```
+    /// Args:
+    ///     table (QvdTable): Source table.
+    ///     col_name (str): Column to index.
+    ///
+    /// Raises:
+    ///     ValueError: If ``col_name`` is not a column of ``table``.
+    ///
+    /// Example:
+    ///     >>> idx = qvd.ExistsIndex(table, "ClientID")
     #[new]
     fn new(table: &PyQvdTable, col_name: &str) -> PyResult<Self> {
         let col = table.inner.header.fields.iter()
@@ -339,11 +538,16 @@ impl PyExistsIndex {
         })
     }
 
-    /// Build an ExistsIndex from an explicit list of values.
+    /// Build an :class:`ExistsIndex` from an explicit list of values.
     ///
-    /// ```python
-    /// idx = qvd.ExistsIndex.from_values(["7", "9"])
-    /// ```
+    /// Args:
+    ///     values (list[str]): Values to index. Duplicates are deduplicated.
+    ///
+    /// Returns:
+    ///     ExistsIndex: New index containing the provided values.
+    ///
+    /// Example:
+    ///     >>> idx = qvd.ExistsIndex.from_values(["7", "9"])
     #[staticmethod]
     fn from_values(values: Vec<String>) -> Self {
         let set: HashSet<String> = values.into_iter().collect();
@@ -353,12 +557,24 @@ impl PyExistsIndex {
         }
     }
 
-    /// Check if a value exists. O(1) hash lookup.
+    /// Check whether a single value is in the index.
+    ///
+    /// Args:
+    ///     value (str): Value to look up.
+    ///
+    /// Returns:
+    ///     bool: ``True`` if present, otherwise ``False``.
     fn exists(&self, value: &str) -> bool {
         self.values.contains(value)
     }
 
-    /// Check multiple values at once, returns list of bools.
+    /// Check multiple values at once.
+    ///
+    /// Args:
+    ///     values (list[str]): Values to look up.
+    ///
+    /// Returns:
+    ///     list[bool]: One flag per input value, in the same order.
     fn exists_many(&self, values: Vec<String>) -> Vec<bool> {
         values.iter().map(|v| self.values.contains(v.as_str())).collect()
     }
@@ -368,7 +584,7 @@ impl PyExistsIndex {
         self.values.len()
     }
 
-    /// Check if a value exists using `in` operator.
+    /// Support for the ``in`` operator.
     fn __contains__(&self, value: &str) -> bool {
         self.values.contains(value)
     }
@@ -378,8 +594,18 @@ impl PyExistsIndex {
     }
 }
 
-/// Filter rows from a QVD table where a column value exists in an ExistsIndex.
-/// Returns list of matching row indices.
+/// Filter rows where a column value is in an :class:`ExistsIndex`.
+///
+/// Args:
+///     table (QvdTable): Table to filter.
+///     col_name (str): Column to look up in ``index``.
+///     index (ExistsIndex): Lookup index.
+///
+/// Returns:
+///     list[int]: Row indices of matching rows, in ascending order.
+///
+/// Raises:
+///     ValueError: If ``col_name`` is not a column of ``table``.
 #[pyfunction]
 fn filter_exists(table: &PyQvdTable, col_name: &str, index: &PyExistsIndex) -> PyResult<Vec<usize>> {
     let col_idx = table.inner.header.fields.iter()
@@ -405,13 +631,35 @@ fn filter_exists(table: &PyQvdTable, col_name: &str, index: &PyExistsIndex) -> P
     Ok(matching_rows)
 }
 
-/// Read a QVD file and return a QvdTable.
+/// Read a QVD file and return a :class:`QvdTable`.
+///
+/// Args:
+///     path (str): Path to the ``.qvd`` file.
+///
+/// Returns:
+///     QvdTable: Loaded table.
+///
+/// Raises:
+///     ValueError: If the file cannot be opened or is not a valid QVD.
+///
+/// Example:
+///     >>> import qvd
+///     >>> table = qvd.read_qvd("data.qvd")
 #[pyfunction]
 fn read_qvd(path: &str) -> PyResult<PyQvdTable> {
     PyQvdTable::load(path)
 }
 
-/// Read a QVD file and return a PyArrow RecordBatch directly.
+/// Read a QVD file and return a PyArrow ``RecordBatch`` directly.
+///
+/// Args:
+///     path (str): Path to the ``.qvd`` file.
+///
+/// Returns:
+///     pyarrow.RecordBatch: Arrow batch with the file contents.
+///
+/// Raises:
+///     ValueError: If the file cannot be read or converted to Arrow.
 #[pyfunction]
 fn read_qvd_to_arrow<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
     let table = reader::read_qvd_file(path)
@@ -421,14 +669,38 @@ fn read_qvd_to_arrow<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, Py
     batch.to_pyarrow(py)
 }
 
-/// Read a QVD file and return a pandas DataFrame directly.
+/// Read a QVD file and return a pandas ``DataFrame`` directly.
+///
+/// Requires ``pyarrow`` and ``pandas`` to be installed.
+///
+/// Args:
+///     path (str): Path to the ``.qvd`` file.
+///
+/// Returns:
+///     pandas.DataFrame: File contents as a pandas frame.
+///
+/// Raises:
+///     ImportError: If ``pyarrow`` is not installed.
+///     ValueError: If the file cannot be read.
 #[pyfunction]
 fn read_qvd_to_pandas<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
     let t = PyQvdTable::load(path)?;
     t.to_pandas(py)
 }
 
-/// Read a QVD file and return a Polars DataFrame directly.
+/// Read a QVD file and return a Polars ``DataFrame`` directly.
+///
+/// Requires ``pyarrow`` and ``polars`` to be installed.
+///
+/// Args:
+///     path (str): Path to the ``.qvd`` file.
+///
+/// Returns:
+///     polars.DataFrame: File contents as a Polars frame.
+///
+/// Raises:
+///     ImportError: If ``pyarrow`` or ``polars`` is not installed.
+///     ValueError: If the file cannot be read.
 #[pyfunction]
 fn read_qvd_to_polars<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
     let t = PyQvdTable::load(path)?;
@@ -436,6 +708,13 @@ fn read_qvd_to_polars<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, P
 }
 
 /// Convert a Parquet file to a QVD file.
+///
+/// Args:
+///     parquet_path (str): Source ``.parquet`` path.
+///     qvd_path (str): Destination ``.qvd`` path.
+///
+/// Raises:
+///     ValueError: If the input cannot be read or the output cannot be written.
 #[pyfunction]
 fn convert_parquet_to_qvd(parquet_path: &str, qvd_path: &str) -> PyResult<()> {
     crate::parquet::convert_parquet_to_qvd(parquet_path, qvd_path)
@@ -443,7 +722,15 @@ fn convert_parquet_to_qvd(parquet_path: &str, qvd_path: &str) -> PyResult<()> {
 }
 
 /// Convert a QVD file to a Parquet file.
-/// compression: "none", "snappy", "gzip", "lz4", "zstd" (default: "snappy")
+///
+/// Args:
+///     qvd_path (str): Source ``.qvd`` path.
+///     parquet_path (str): Destination ``.parquet`` path.
+///     compression (Literal["none", "snappy", "gzip", "lz4", "zstd"], optional):
+///         Compression codec. Default is ``"snappy"``.
+///
+/// Raises:
+///     ValueError: If the codec name is invalid or the conversion fails.
 #[pyfunction]
 #[pyo3(signature = (qvd_path, parquet_path, compression=None))]
 fn convert_qvd_to_parquet(qvd_path: &str, parquet_path: &str, compression: Option<&str>) -> PyResult<()> {
@@ -453,15 +740,34 @@ fn convert_qvd_to_parquet(qvd_path: &str, parquet_path: &str, compression: Optio
         .map_err(|e| PyValueError::new_err(format!("{}", e)))
 }
 
-/// Read a QVD file with streaming EXISTS() filter and optional column selection.
+/// Read a QVD file with a streaming EXISTS() filter and optional column projection.
+///
 /// Only matching rows are loaded into memory — much faster and lighter for large files.
 ///
-/// ```python
-/// idx = qvd.ExistsIndex.from_values(["7", "9"])
-/// table = qvd.read_qvd_filtered("large.qvd", "%Action_ID", idx,
-///                                 select=["%Client_ID", "Date_BK", "%Action_ID"])
-/// table.save("filtered.qvd")
-/// ```
+/// Args:
+///     path (str): Path to the QVD file.
+///     filter_col (str): Column name to filter on.
+///     index (ExistsIndex): Lookup index built via :meth:`ExistsIndex.from_values`
+///         or from another table's column.
+///     select (list[str], optional): Subset of columns to load. Default loads all
+///         columns.
+///     chunk_size (int, optional): Streaming chunk size in rows. Default is
+///         ``65536``.
+///
+/// Returns:
+///     QvdTable: Filtered table containing only the matching rows.
+///
+/// Raises:
+///     ValueError: If the file cannot be read or ``filter_col`` does not exist.
+///
+/// Example:
+///     >>> import qvd
+///     >>> idx = qvd.ExistsIndex.from_values(["7", "9"])
+///     >>> table = qvd.read_qvd_filtered(
+///     ...     "large.qvd", "%Action_ID", idx,
+///     ...     select=["%Client_ID", "Date_BK", "%Action_ID"],
+///     ... )
+///     >>> table.save("filtered.qvd")
 #[pyfunction]
 #[pyo3(signature = (path, filter_col, index, select=None, chunk_size=None))]
 fn read_qvd_filtered(
@@ -483,14 +789,25 @@ fn read_qvd_filtered(
     Ok(PyQvdTable { inner: table })
 }
 
-/// Register a QVD file as a DuckDB table. One call — then query with SQL.
+/// Register a QVD file as a DuckDB table.
 ///
-/// ```python
-/// import qvd, duckdb
-/// conn = duckdb.connect()
-/// qvd.register_duckdb(conn, "sales", "sales.qvd")
-/// conn.sql("SELECT * FROM sales WHERE amount > 100").show()
-/// ```
+/// After registration, the table is queryable via SQL on the given connection.
+/// Requires ``pyarrow`` and a DuckDB connection.
+///
+/// Args:
+///     conn (duckdb.DuckDBPyConnection): Target DuckDB connection.
+///     table_name (str): Name under which the table is registered.
+///     path (str): Path to the ``.qvd`` file.
+///
+/// Raises:
+///     ImportError: If ``pyarrow`` is not installed.
+///     ValueError: If the file cannot be read or registered.
+///
+/// Example:
+///     >>> import qvd, duckdb
+///     >>> conn = duckdb.connect()
+///     >>> qvd.register_duckdb(conn, "sales", "sales.qvd")
+///     >>> conn.sql("SELECT * FROM sales WHERE amount > 100").show()
 #[pyfunction]
 fn register_duckdb<'py>(conn: &Bound<'py, PyAny>, table_name: &str, path: &str) -> PyResult<()> {
     let py = conn.py();
@@ -510,18 +827,35 @@ fn register_duckdb<'py>(conn: &Bound<'py, PyAny>, table_name: &str, path: &str) 
     Ok(())
 }
 
-/// Register a QVD file as a DuckDB table with streaming EXISTS() filter.
+/// Register a QVD file as a DuckDB table with a streaming EXISTS() filter.
+///
 /// Only matching rows are loaded — memory-efficient for large files.
 ///
-/// ```python
-/// import qvd, duckdb
-/// conn = duckdb.connect()
-/// idx = qvd.ExistsIndex.from_values(["7", "9"])
-/// qvd.register_duckdb_filtered(conn, "cal79", "large.qvd",
-///                               "%Action_ID", idx,
-///                               select=["%Client_ID", "Date_BK", "%Action_ID"])
-/// conn.sql("SELECT COUNT(*) FROM cal79").show()
-/// ```
+/// Args:
+///     conn (duckdb.DuckDBPyConnection): Target DuckDB connection.
+///     table_name (str): Name under which the table is registered.
+///     path (str): Path to the ``.qvd`` file.
+///     filter_col (str): Column name to filter on.
+///     index (ExistsIndex): Lookup index.
+///     select (list[str], optional): Subset of columns to load. Default loads all
+///         columns.
+///     chunk_size (int, optional): Streaming chunk size in rows. Default is
+///         ``65536``.
+///
+/// Raises:
+///     ImportError: If ``pyarrow`` is not installed.
+///     ValueError: If the file cannot be read, ``filter_col`` is missing, or
+///         registration fails.
+///
+/// Example:
+///     >>> import qvd, duckdb
+///     >>> conn = duckdb.connect()
+///     >>> idx = qvd.ExistsIndex.from_values(["7", "9"])
+///     >>> qvd.register_duckdb_filtered(
+///     ...     conn, "cal79", "large.qvd", "%Action_ID", idx,
+///     ...     select=["%Client_ID", "Date_BK", "%Action_ID"],
+///     ... )
+///     >>> conn.sql("SELECT COUNT(*) FROM cal79").show()
 #[pyfunction]
 #[pyo3(signature = (conn, table_name, path, filter_col, index, select=None, chunk_size=None))]
 fn register_duckdb_filtered<'py>(
@@ -558,32 +892,42 @@ fn register_duckdb_filtered<'py>(
 }
 
 /// Register QVD files from one or more directories as DuckDB tables.
-/// Table names are derived from file names (without .qvd extension).
+///
+/// Each registered table is named after its file (without the ``.qvd``
+/// extension). Files larger than ``max_file_size_mb`` are skipped with a
+/// :class:`UserWarning`; failures on individual files are reported the same way
+/// and do not abort the run.
 ///
 /// Args:
-///   conn: DuckDB connection
-///   folder_paths: single path (str) or list of paths
-///   recursive: scan subdirectories (default: False)
-///   glob: file pattern to match (default: "*.qvd")
-///   max_file_size_mb: skip files larger than this (default: 500 MB)
+///     conn (duckdb.DuckDBPyConnection): Target DuckDB connection.
+///     folder_paths (str | list[str]): Single directory path or list of paths to
+///         scan.
+///     recursive (bool, optional): Recurse into subdirectories. Default is
+///         ``False``.
+///     glob (str, optional): File-name pattern. Supports ``"prefix*"``,
+///         ``"*suffix"``, ``"prefix*suffix"`` and ``"*mid*"``. Default is
+///         ``"*.qvd"``.
+///     max_file_size_mb (int, optional): Skip files larger than this many
+///         megabytes. Default is ``500``.
 ///
-/// Returns: list of registered table names
+/// Returns:
+///     list[str]: Sorted list of successfully registered table names.
 ///
-/// ```python
-/// import qvd, duckdb
-/// conn = duckdb.connect()
+/// Raises:
+///     ImportError: If ``pyarrow`` is not installed.
+///     ValueError: If ``folder_paths`` is neither a string nor a list of strings.
 ///
-/// # Single folder
-/// tables = qvd.register_duckdb_folder(conn, "/path/to/qvd_files/")
-///
-/// # Multiple folders
-/// tables = qvd.register_duckdb_folder(conn, ["/data/sales/", "/data/crm/"])
-///
-/// # Recursive with pattern
-/// tables = qvd.register_duckdb_folder(conn, "/data/", recursive=True, glob="client_*.qvd")
-///
-/// conn.sql("SELECT * FROM sales JOIN customers ON ...").show()
-/// ```
+/// Example:
+///     >>> import qvd, duckdb
+///     >>> conn = duckdb.connect()
+///     >>> tables = qvd.register_duckdb_folder(conn, "/path/to/qvd_files/")
+///     >>> tables = qvd.register_duckdb_folder(
+///     ...     conn, ["/data/sales/", "/data/crm/"],
+///     ... )
+///     >>> tables = qvd.register_duckdb_folder(
+///     ...     conn, "/data/", recursive=True, glob="client_*.qvd",
+///     ... )
+///     >>> conn.sql("SELECT * FROM sales JOIN customers ON ...").show()
 #[pyfunction]
 #[pyo3(signature = (conn, folder_paths, recursive=None, glob=None, max_file_size_mb=None))]
 fn register_duckdb_folder<'py>(
@@ -752,14 +1096,23 @@ fn collect_qvd_files<'py>(
 // write_arrow: Arrow → QVD in one call
 // ============================================================
 
-/// Write a PyArrow RecordBatch or Table directly to a QVD file.
+/// Write a PyArrow ``RecordBatch`` or ``Table`` directly to a QVD file.
 ///
-/// Accepts pyarrow.RecordBatch or pyarrow.Table (handles combine_chunks internally).
+/// Args:
+///     data (pyarrow.RecordBatch | pyarrow.Table): Source Arrow data. A ``Table``
+///         is internally combined into a single ``RecordBatch`` via
+///         ``combine_chunks``.
+///     path (str): Destination ``.qvd`` path.
+///     table_name (str, optional): Name to store in the QVD header. Default is
+///         ``"table"``.
 ///
-/// ```python
-/// qvd.write_arrow(batch, "output.qvd", table_name="sales")
-/// qvd.write_arrow(arrow_table, "output.qvd")
-/// ```
+/// Raises:
+///     ValueError: If ``data`` is neither a ``RecordBatch`` nor a ``Table``, or
+///         is an empty ``Table``.
+///
+/// Example:
+///     >>> qvd.write_arrow(batch, "output.qvd", table_name="sales")
+///     >>> qvd.write_arrow(arrow_table, "output.qvd")
 #[pyfunction]
 #[pyo3(signature = (data, path, table_name=None))]
 fn write_arrow(
@@ -797,14 +1150,28 @@ fn extract_record_batch(obj: &Bound<'_, PyAny>) -> PyResult<arrow::record_batch:
 // Top-level concatenate functions
 // ============================================================
 
-/// Concatenate two QVD files (pure append, no deduplication).
+/// Concatenate two QVD sources into a new QVD file (pure append, no deduplication).
 ///
-/// new_rows can be: str (path to .qvd), pyarrow.RecordBatch, or QvdTable.
+/// Args:
+///     existing_path (str): Path to the existing ``.qvd`` file.
+///     new_rows (str | pyarrow.RecordBatch | pyarrow.Table | QvdTable): Rows to
+///         append. A string is interpreted as a path to a ``.qvd`` file.
+///     out_path (str): Destination ``.qvd`` path.
+///     table_name (str, optional): If provided, overrides the QVD header table
+///         name in the output (and is used as the Arrow→QVD fallback name).
+///     schema (Literal["strict", "union"]): ``"strict"`` errors on column
+///         mismatch, ``"union"`` fills missing columns with NULL. Default is
+///         ``"strict"``.
 ///
-/// ```python
-/// qvd.concatenate_qvd("existing.qvd", "new_data.qvd", "merged.qvd")
-/// qvd.concatenate_qvd("existing.qvd", arrow_batch, "merged.qvd", table_name="sales")
-/// ```
+/// Raises:
+///     ValueError: On invalid ``schema``, unreadable input, unsupported
+///         ``new_rows`` type, or column mismatch under ``"strict"``.
+///
+/// Example:
+///     >>> qvd.concatenate_qvd("existing.qvd", "new_data.qvd", "merged.qvd")
+///     >>> qvd.concatenate_qvd(
+///     ...     "existing.qvd", arrow_batch, "merged.qvd", table_name="sales",
+///     ... )
 #[pyfunction]
 #[pyo3(signature = (existing_path, new_rows, out_path, table_name=None, schema="strict"))]
 fn concatenate_qvd(
@@ -827,12 +1194,37 @@ fn concatenate_qvd(
         .map_err(|e| PyValueError::new_err(format!("{}", e)))
 }
 
-/// Concatenate with primary-key deduplication.
+/// Concatenate two QVD sources with primary-key deduplication.
 ///
-/// ```python
-/// qvd.concatenate_pk_qvd("existing.qvd", "new.qvd", "out.qvd", pk="order_id")
-/// qvd.concatenate_pk_qvd("existing.qvd", batch, "out.qvd", pk=["a","b"], on_conflict="skip")
-/// ```
+/// Args:
+///     existing_path (str): Path to the existing ``.qvd`` file.
+///     new_rows (str | pyarrow.RecordBatch | pyarrow.Table | QvdTable): Rows to
+///         append. A string is interpreted as a path to a ``.qvd`` file.
+///     out_path (str): Destination ``.qvd`` path.
+///     pk (str | list[str]): Primary-key column, or list of columns for a
+///         composite key.
+///     on_conflict (Literal["replace", "skip", "error"]): Behaviour when a PK
+///         collision is detected. ``"replace"`` lets new rows win, ``"skip"``
+///         keeps existing rows, ``"error"`` raises. Default is ``"replace"``.
+///     table_name (str, optional): If provided, overrides the QVD header table
+///         name in the output.
+///     schema (Literal["strict", "union"]): ``"strict"`` errors on column
+///         mismatch, ``"union"`` fills missing columns with NULL. Default is
+///         ``"strict"``.
+///
+/// Raises:
+///     ValueError: On invalid ``on_conflict``/``schema`` values, unreadable
+///         input, unsupported ``new_rows`` type, missing PK column, or PK
+///         collision when ``on_conflict="error"``.
+///
+/// Example:
+///     >>> qvd.concatenate_pk_qvd(
+///     ...     "existing.qvd", "new.qvd", "out.qvd", pk="order_id",
+///     ... )
+///     >>> qvd.concatenate_pk_qvd(
+///     ...     "existing.qvd", batch, "out.qvd",
+///     ...     pk=["a", "b"], on_conflict="skip",
+///     ... )
 #[pyfunction]
 #[pyo3(signature = (existing_path, new_rows, out_path, pk, on_conflict="replace", table_name=None, schema="strict"))]
 fn concatenate_pk_qvd(
@@ -948,7 +1340,7 @@ fn parse_on_conflict(s: &str) -> PyResult<crate::concat::OnConflict> {
     }
 }
 
-/// Python module definition.
+/// Module contains the core classes and functions for dealing with QVD files in Python.
 #[pymodule]
 fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyQvdTable>()?;
