@@ -1,6 +1,6 @@
 {
   "name": "qvdrs",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "High-performance Qlik QVD file reader/writer — Rust-powered Node.js bindings",
   "main": "index.js",
   "types": "index.d.ts",

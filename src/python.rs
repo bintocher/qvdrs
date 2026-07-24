@@ -816,7 +816,9 @@ impl PyQvdChunkReader {
         let mut header = slf.stream.header.clone();
         header.no_of_records = num_rows;
 
-        let symbols = slf.stream.symbols.clone();
+        // Move the symbol tables out of the stream (no clone) to build the
+        // per-chunk table, then restore them so the next chunk can reuse them.
+        let symbols = std::mem::take(&mut slf.stream.symbols);
 
         let chunk_table = crate::reader::QvdTable {
             header,
@@ -826,8 +828,10 @@ impl PyQvdChunkReader {
             raw_binary: Vec::new(),
         };
 
-        let batch = crate::parquet::qvd_to_record_batch(&chunk_table)
-            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        let batch_result = crate::parquet::qvd_to_record_batch(&chunk_table);
+        slf.stream.symbols = chunk_table.symbols;
+
+        let batch = batch_result.map_err(|e| PyValueError::new_err(format!("{}", e)))?;
 
         Ok(Some(batch.to_pyarrow(py)?))
     }
