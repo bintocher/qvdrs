@@ -630,6 +630,35 @@ def test_write_arrow():
     os.unlink(tmp)
 
 
+def test_chunk_reader(qvd_path):
+    """Test streaming chunk reader open_qvd_chunks (bounded-memory iteration)."""
+    import pyarrow as pa
+    import qvd
+
+    print("\n== Test: open_qvd_chunks (streaming) ==")
+
+    full = pa.Table.from_batches([qvd.read_qvd(qvd_path).to_arrow()])
+
+    reader = qvd.open_qvd_chunks(qvd_path, chunk_size=2)
+    assert_eq("chunk reader total_rows", reader.total_rows(), full.num_rows)
+    assert_eq("chunk reader chunk_size", reader.chunk_size, 2)
+    assert_eq("chunk reader column_names", reader.column_names(), full.column_names)
+
+    chunks = list(reader)
+    assert_true("chunk yields RecordBatch",
+                all(isinstance(b, pa.RecordBatch) for b in chunks))
+    sizes = [b.num_rows for b in chunks]
+    assert_eq("chunk sizes sum to total", sum(sizes), full.num_rows)
+    assert_true("each chunk bounded by chunk_size", all(s <= 2 for s in sizes))
+
+    combined = pa.Table.from_batches(chunks)
+    assert_true("streamed data equals read_qvd", combined.equals(full))
+
+    # default chunk_size still reads every row
+    all_rows = sum(b.num_rows for b in qvd.open_qvd_chunks(qvd_path))
+    assert_eq("default chunk_size total rows", all_rows, full.num_rows)
+
+
 # ── main ─────────────────────────────────────────────────────────────
 
 def main():
@@ -692,6 +721,7 @@ def main():
     test_concatenate(qvd_path)
     test_concatenate_pk(qvd_path)
     test_write_arrow()
+    test_chunk_reader(qvd_path)
 
     # Cleanup
     os.unlink(qvd_path)

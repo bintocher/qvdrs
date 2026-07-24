@@ -740,6 +740,135 @@ fn convert_qvd_to_parquet(qvd_path: &str, parquet_path: &str, compression: Optio
         .map_err(|e| PyValueError::new_err(format!("{}", e)))
 }
 
+/// Streaming, chunk-based reader over a QVD file.
+///
+/// Yields one :class:`pyarrow.RecordBatch` per chunk of rows without loading
+/// the whole index table into memory. Symbol tables are held fully (they are
+/// required to decode any row), but row indices are streamed chunk by chunk.
+///
+/// The object is a Python iterator: use it in a ``for`` loop or call
+/// :func:`next` on it. The Arrow schema is identical across every chunk.
+///
+/// Create instances via :func:`open_qvd_chunks`, not directly.
+///
+/// Args (via :func:`open_qvd_chunks`):
+///     path (str): Path to the ``.qvd`` file.
+///     chunk_size (int, optional): Rows per chunk. Default is ``65536``.
+///
+/// Example:
+///     >>> import qvd
+///     >>> reader = qvd.open_qvd_chunks("huge.qvd", chunk_size=1_000_000)
+///     >>> print(reader.total_rows())
+///     >>> for batch in reader:
+///     ...     print(batch.num_rows)          # a pyarrow.RecordBatch
+#[pyclass(name = "QvdChunkReader")]
+pub struct PyQvdChunkReader {
+    stream: crate::streaming::QvdStreamReader<std::io::BufReader<std::fs::File>>,
+    chunk_size: usize,
+}
+
+#[pymethods]
+impl PyQvdChunkReader {
+    /// Total number of rows in the file.
+    fn total_rows(&self) -> usize {
+        self.stream.total_rows()
+    }
+
+    /// Number of rows not yet consumed by iteration.
+    fn remaining_rows(&self) -> usize {
+        self.stream.remaining_rows()
+    }
+
+    /// Column names, in file order.
+    fn column_names(&self) -> Vec<String> {
+        self.stream.column_names().iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The configured chunk size (rows per batch).
+    #[getter]
+    fn chunk_size(&self) -> usize {
+        self.chunk_size
+    }
+
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    /// Return the next chunk as a ``pyarrow.RecordBatch``, or raise
+    /// ``StopIteration`` when the file is exhausted.
+    fn __next__<'py>(mut slf: PyRefMut<'py, Self>, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        let chunk_size = slf.chunk_size;
+
+        // Pull the next chunk of raw symbol indices (streamed; NULLs are negative).
+        let chunk = slf.stream
+            .next_chunk_indices(chunk_size)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+
+        let (columns, num_rows, _start_row) = match chunk {
+            Some(c) => c,
+            None => return Ok(None), // exhausted -> StopIteration
+        };
+
+        // Build a per-chunk QvdTable that reuses the file's full symbol tables
+        // and original field headers. Because the symbols passed to
+        // qvd_to_record_batch are the same every chunk, infer_arrow_type
+        // produces an identical Arrow schema for every batch.
+        let mut header = slf.stream.header.clone();
+        header.no_of_records = num_rows;
+
+        // Move the symbol tables out of the stream (no clone) to build the
+        // per-chunk table, then restore them so the next chunk can reuse them.
+        let symbols = std::mem::take(&mut slf.stream.symbols);
+
+        let chunk_table = crate::reader::QvdTable {
+            header,
+            symbols,
+            row_indices: columns,
+            raw_xml: Vec::new(),
+            raw_binary: Vec::new(),
+        };
+
+        let batch_result = crate::parquet::qvd_to_record_batch(&chunk_table);
+        slf.stream.symbols = chunk_table.symbols;
+
+        let batch = batch_result.map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+
+        Ok(Some(batch.to_pyarrow(py)?))
+    }
+}
+
+/// Open a QVD file for streaming, chunk-based reading.
+///
+/// Returns a :class:`QvdChunkReader` that yields one
+/// :class:`pyarrow.RecordBatch` per chunk. Memory stays bounded to the symbol
+/// tables plus a single chunk, regardless of the file's row count.
+///
+/// Args:
+///     path (str): Path to the ``.qvd`` file.
+///     chunk_size (int, optional): Rows per chunk. Default is ``65536``.
+///
+/// Returns:
+///     QvdChunkReader: An iterator of ``pyarrow.RecordBatch`` chunks.
+///
+/// Raises:
+///     ValueError: If the file cannot be opened or is not a valid QVD.
+///
+/// Example:
+///     >>> import qvd
+///     >>> for batch in qvd.open_qvd_chunks("huge.qvd", chunk_size=1_000_000):
+///     ...     do_something(batch)
+#[pyfunction]
+#[pyo3(signature = (path, chunk_size=None))]
+fn open_qvd_chunks(path: &str, chunk_size: Option<usize>) -> PyResult<PyQvdChunkReader> {
+    let stream = crate::streaming::open_qvd_stream(path)
+        .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+    let chunk_size = chunk_size.unwrap_or(65536);
+    if chunk_size == 0 {
+        return Err(PyValueError::new_err("chunk_size must be greater than 0"));
+    }
+    Ok(PyQvdChunkReader { stream, chunk_size })
+}
+
 /// Read a QVD file with a streaming EXISTS() filter and optional column projection.
 ///
 /// Only matching rows are loaded into memory — much faster and lighter for large files.
@@ -1345,10 +1474,12 @@ fn parse_on_conflict(s: &str) -> PyResult<crate::concat::OnConflict> {
 fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyQvdTable>()?;
     m.add_class::<PyExistsIndex>()?;
+    m.add_class::<PyQvdChunkReader>()?;
     m.add_function(wrap_pyfunction!(read_qvd, m)?)?;
     m.add_function(wrap_pyfunction!(filter_exists, m)?)?;
     m.add_function(wrap_pyfunction!(convert_parquet_to_qvd, m)?)?;
     m.add_function(wrap_pyfunction!(convert_qvd_to_parquet, m)?)?;
+    m.add_function(wrap_pyfunction!(open_qvd_chunks, m)?)?;
     m.add_function(wrap_pyfunction!(read_qvd_to_arrow, m)?)?;
     m.add_function(wrap_pyfunction!(read_qvd_to_pandas, m)?)?;
     m.add_function(wrap_pyfunction!(read_qvd_to_polars, m)?)?;
