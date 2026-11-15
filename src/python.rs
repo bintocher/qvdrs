@@ -1470,8 +1470,84 @@ fn parse_on_conflict(s: &str) -> PyResult<crate::concat::OnConflict> {
 }
 
 /// Module contains the core classes and functions for dealing with QVD files in Python.
+/// Read QVD metadata without loading symbols or records.
+#[pyfunction]
+#[pyo3(signature = (path, max_header_bytes=16_777_216))]
+fn read_qvd_header<'py>(py: Python<'py>, path: &str, max_header_bytes: u64)
+    -> PyResult<Bound<'py, PyDict>> {
+    let header = reader::read_qvd_header_file(path, max_header_bytes)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let result = PyDict::new(py);
+    result.set_item("table_name", &header.table_name)?;
+    result.set_item("creator_doc", &header.creator_doc)?;
+    result.set_item("create_utc_time", &header.create_utc_time)?;
+    result.set_item("qv_build_no", &header.qv_build_no)?;
+    result.set_item("source_create_utc_time", &header.source_create_utc_time)?;
+    result.set_item("source_file_utc_time", &header.source_file_utc_time)?;
+    result.set_item("source_file_size", &header.source_file_size)?;
+    result.set_item("stale_utc_time", &header.stale_utc_time)?;
+    result.set_item("compression", &header.compression)?;
+    result.set_item("num_records", header.no_of_records)?;
+    result.set_item("num_fields", header.fields.len())?;
+    result.set_item("record_byte_size", header.record_byte_size)?;
+    result.set_item("offset", header.offset)?;
+    result.set_item("length", header.length)?;
+    result.set_item("comment", &header.comment)?;
+    let fields = PyList::empty(py);
+    for field in &header.fields {
+        let item = PyDict::new(py);
+        item.set_item("name", &field.field_name)?;
+        item.set_item("num_symbols", field.no_of_symbols)?;
+        item.set_item("bit_width", field.bit_width)?;
+        item.set_item("bit_offset", field.bit_offset)?;
+        item.set_item("bias", field.bias)?;
+        item.set_item("offset", field.offset)?;
+        item.set_item("length", field.length)?;
+        item.set_item("comment", &field.comment)?;
+        item.set_item("tags", &field.tags)?;
+        let format = PyDict::new(py);
+        format.set_item("type", &field.number_format.format_type)?;
+        format.set_item("n_dec", field.number_format.n_dec)?;
+        format.set_item("use_thou", field.number_format.use_thou)?;
+        format.set_item("fmt", &field.number_format.fmt)?;
+        format.set_item("dec", &field.number_format.dec)?;
+        format.set_item("thou", &field.number_format.thou)?;
+        item.set_item("number_format", format)?;
+        fields.append(item)?;
+    }
+    result.set_item("fields", fields)?;
+    let lineage = PyList::empty(py);
+    for entry in &header.lineage {
+        let item = PyDict::new(py);
+        item.set_item("discriminator", &entry.discriminator)?;
+        item.set_item("statement", &entry.statement)?;
+        lineage.append(item)?;
+    }
+    result.set_item("lineage", lineage)?;
+    Ok(result)
+}
+
+/// Read one symbol table without loading row indices. Duals retain their text label.
+#[pyfunction]
+fn read_qvd_symbols<'py>(py: Python<'py>, path: &str, field: &str)
+    -> PyResult<Bound<'py, PyList>> {
+    let symbols = reader::read_qvd_symbols_file(path, field)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let result = PyList::empty(py);
+    for symbol in symbols {
+        match symbol {
+            crate::value::QvdSymbol::Int(value) => result.append(value)?,
+            crate::value::QvdSymbol::Double(value) => result.append(value)?,
+            _ => result.append(symbol.to_string_repr())?,
+        }
+    }
+    Ok(result)
+}
+
 #[pymodule]
 fn qvd(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(read_qvd_header, m)?)?;
+    m.add_function(wrap_pyfunction!(read_qvd_symbols, m)?)?;
     m.add_class::<PyQvdTable>()?;
     m.add_class::<PyExistsIndex>()?;
     m.add_class::<PyQvdChunkReader>()?;

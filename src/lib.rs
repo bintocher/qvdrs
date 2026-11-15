@@ -175,7 +175,8 @@ pub mod napi;
 
 pub use error::{QvdError, QvdResult};
 pub use header::QvdTableHeader;
-pub use reader::{read_qvd, read_qvd_file, QvdTable};
+pub use reader::{read_qvd, read_qvd_file, read_qvd_header, read_qvd_header_file,
+                 read_qvd_symbols_file, DEFAULT_HEADER_LIMIT, QvdTable};
 pub use writer::{write_qvd, write_qvd_file, QvdTableBuilder};
 pub use exists::{ExistsIndex, filter_rows_by_exists, filter_rows_by_exists_fast};
 pub use value::{QvdSymbol, QvdValue};

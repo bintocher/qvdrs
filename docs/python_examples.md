@@ -1,5 +1,24 @@
 # Python Examples
 
+## Read Metadata Without Loading Records
+
+```python
+import qvd
+
+header = qvd.read_qvd_header("data.qvd")
+print(header["num_records"], header["creator_doc"], header["create_utc_time"])
+print([field["name"] for field in header["fields"]])
+symbols = qvd.read_qvd_symbols("data.qvd", "ClientID")
+```
+
+`read_qvd_header(path, max_header_bytes=16_777_216)` reads only the bounded XML
+prefix. It does not load symbol tables or row indices, so its work is independent
+of the record count. It returns all table metadata, field metadata and lineage as
+a dictionary. It does not validate the binary section.
+`read_qvd_symbols(path, field)` additionally reads only that field's dictionary.
+Numeric symbols are returned as numbers; text and dual symbols retain their text.
+Use Arrow data reads when calculations require the numeric component of duals.
+
 ## Read and Write QVD
 
 ```python

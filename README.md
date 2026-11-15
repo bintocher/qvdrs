@@ -11,6 +11,9 @@ High-performance Rust library for reading, writing, converting and merging Qlik 
 
 ## Features
 
+- Header-only metadata reads in Rust and Python, without loading symbols or records.
+- Single-field dictionary reads without decoding row indices.
+
 - **Read/Write** QVD with byte-identical roundtrip (tested on 399 files up to 2.8 GB)
 - **Streaming** chunk-based reader for large files
 - **EXISTS()** O(1) index + filtered reads (2.5x faster than Qlik Sense)

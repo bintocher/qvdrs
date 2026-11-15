@@ -6,6 +6,65 @@ use crate::index::read_all_row_indices;
 use crate::symbol::read_symbols;
 use crate::value::{QvdSymbol, QvdValue};
 
+/// Default bound for the XML prefix, excluding symbol and record data.
+pub const DEFAULT_HEADER_LIMIT: u64 = 16 * 1024 * 1024;
+
+fn header_prefix<R: BufRead>(reader: &mut R, max_bytes: u64) -> QvdResult<Vec<u8>> {
+    let mut raw = Vec::new();
+    reader.take(max_bytes.saturating_add(1)).read_until(0, &mut raw)?;
+    if raw.len() as u64 > max_bytes {
+        return Err(QvdError::Format("QVD header exceeds max_header_bytes".into()));
+    }
+    if raw.last() != Some(&0) {
+        return Err(QvdError::Format("QVD header has no NUL terminator".into()));
+    }
+    Ok(raw)
+}
+
+fn parse_prefix(raw: &[u8]) -> QvdResult<QvdTableHeader> {
+    let xml = std::str::from_utf8(&raw[..raw.len() - 1])
+        .map_err(|e| QvdError::Format(format!("XML header is not valid UTF-8: {}", e)))?;
+    let xml = xml.trim_start_matches('\u{feff}');
+    if !xml.contains("<QvdTableHeader>") || !xml.contains("</QvdTableHeader>") {
+        return Err(QvdError::Format("Incomplete QVD header".into()));
+    }
+    parse_xml_header(xml)
+}
+
+/// Read only QVD metadata. Symbol tables and row indices are not parsed or loaded.
+pub fn read_qvd_header<R: BufRead>(mut reader: R) -> QvdResult<QvdTableHeader> {
+    let raw = header_prefix(&mut reader, DEFAULT_HEADER_LIMIT)?;
+    parse_prefix(&raw)
+}
+
+/// Read only the header from a file, with a bounded XML prefix.
+pub fn read_qvd_header_file(path: &str, max_header_bytes: u64) -> QvdResult<QvdTableHeader> {
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path)?);
+    let raw = header_prefix(&mut reader, max_header_bytes)?;
+    parse_prefix(&raw)
+}
+
+/// Read one field's symbol table, without reading the record/index section.
+pub fn read_qvd_symbols_file(path: &str, field_name: &str) -> QvdResult<Vec<QvdSymbol>> {
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path)?);
+    let raw = header_prefix(&mut reader, DEFAULT_HEADER_LIMIT)?;
+    let header = parse_prefix(&raw)?;
+    let mut field = header.fields.iter().find(|f| f.field_name == field_name)
+        .cloned().ok_or_else(|| QvdError::Format(format!("Unknown field: {}", field_name)))?;
+    let start = (raw.len() as u64).checked_add(field.offset as u64)
+        .ok_or_else(|| QvdError::Format("Symbol offset overflow".into()))?;
+    let end = start.checked_add(field.length as u64)
+        .ok_or_else(|| QvdError::Format("Symbol length overflow".into()))?;
+    if end > reader.get_ref().metadata()?.len() {
+        return Err(QvdError::Format("Symbol table exceeds file size".into()));
+    }
+    reader.seek(SeekFrom::Start(start))?;
+    let mut symbols = vec![0; field.length];
+    reader.read_exact(&mut symbols)?;
+    field.offset = 0;
+    read_symbols(&symbols, &field)
+}
+
 /// A fully parsed QVD file containing metadata, symbol tables, and row indices.
 ///
 /// Use [`read_qvd_file`] to load from disk, then access data via [`get`](QvdTable::get),

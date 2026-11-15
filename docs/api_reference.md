@@ -5,6 +5,9 @@
 | Function / Type | Description |
 |---|---|
 | `read_qvd_file(path)` | Read a QVD file into `QvdTable` |
+| `read_qvd_header(reader)` | Read only metadata from a buffered reader |
+| `read_qvd_header_file(path, max_header_bytes)` | Read only the bounded XML prefix of a file |
+| `read_qvd_symbols_file(path, field)` | Read one dictionary without row indices |
 | `write_qvd_file(table, path)` | Write `QvdTable` to QVD file |
 | `QvdTableBuilder::new(name)` | Build a QVD table from scratch |
 | `QvdTable::normalize()` | Auto-set Qlik-compatible types, tags, format |
@@ -27,6 +30,8 @@
 | Function / Method | Description |
 |---|---|
 | `qvd.read_qvd(path)` | Read QVD into `QvdTable` |
+| `qvd.read_qvd_header(path, max_header_bytes=16_777_216)` | Header metadata as a dict; no symbol or record decoding |
+| `qvd.read_qvd_symbols(path, field)` | One field's dictionary; no row-index decoding |
 | `table.save(path)` | Write QVD to file |
 | `qvd.read_qvd_to_arrow(path)` | Read as PyArrow RecordBatch |
 | `qvd.read_qvd_to_pandas(path)` | Read as pandas DataFrame |
