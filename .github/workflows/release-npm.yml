@@ -107,6 +107,8 @@ jobs:
 
       - name: Publish platform packages to npm
         shell: pwsh
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           foreach ($directory in Get-ChildItem npm -Directory) {
             Push-Location $directory.FullName
@@ -118,3 +120,5 @@ jobs:
 
       - name: Publish main package
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
