@@ -66,8 +66,7 @@ pub fn filter_rows_by_exists(
     };
 
     let mut matching_rows = Vec::new();
-    for row in 0..table.num_rows() {
-        let sym_idx = table.row_indices[col_idx][row];
+    for (row, &sym_idx) in table.row_indices[col_idx][..table.num_rows()].iter().enumerate() {
         if sym_idx < 0 {
             continue; // NULL never matches
         }
@@ -96,8 +95,7 @@ pub fn filter_rows_by_exists_fast(
         .collect();
 
     let mut matching_rows = Vec::with_capacity(table.num_rows() / 4);
-    for row in 0..table.num_rows() {
-        let sym_idx = table.row_indices[col_idx][row];
+    for (row, &sym_idx) in table.row_indices[col_idx][..table.num_rows()].iter().enumerate() {
         if sym_idx >= 0 {
             let sym_idx = sym_idx as usize;
             if sym_idx < symbol_matches.len() && symbol_matches[sym_idx] {

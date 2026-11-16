@@ -258,7 +258,7 @@ def test_duckdb(qvd_path: str):
 
     # Single table query
     data = qvd.read_qvd_to_arrow(qvd_path)
-    result = duckdb.sql("SELECT COUNT(*) as cnt FROM data").fetchone()
+    result = duckdb.sql("SELECT COUNT(*) as cnt FROM data").fetchall()[0]
     assert_eq("duckdb count", result[0], 5)
 
     # Filter
@@ -271,7 +271,7 @@ def test_duckdb(qvd_path: str):
     assert_eq("duckdb group by", result, [("London", 2), ("Moscow", 2)])
 
     # NULL handling
-    result = duckdb.sql("SELECT COUNT(*) as cnt FROM data WHERE rating IS NULL").fetchone()
+    result = duckdb.sql("SELECT COUNT(*) as cnt FROM data WHERE rating IS NULL").fetchall()[0]
     assert_eq("duckdb null count", result[0], 2)
 
     # JOIN two QVD-sourced tables
@@ -287,7 +287,7 @@ def test_duckdb(qvd_path: str):
     assert_eq("duckdb join rows", len(result), 4)
 
     # Numeric operations
-    result = duckdb.sql("SELECT SUM(amount_int) as total FROM data").fetchone()
+    result = duckdb.sql("SELECT SUM(amount_int) as total FROM data").fetchall()[0]
     assert_true("duckdb sum", result[0] is not None, f"sum = {result[0]}")
 
 
@@ -303,7 +303,7 @@ def test_register_duckdb(qvd_path: str):
     # register_duckdb
     conn = duckdb.connect()
     qvd.register_duckdb(conn, "sales", qvd_path)
-    cnt = conn.sql("SELECT COUNT(*) FROM sales").fetchone()[0]
+    cnt = conn.sql("SELECT COUNT(*) FROM sales").fetchall()[0][0]
     assert_eq("register_duckdb row count", cnt, 5)
 
     names = [r[0] for r in conn.sql("SELECT name FROM sales WHERE score > 90 ORDER BY name").fetchall()]
@@ -312,7 +312,7 @@ def test_register_duckdb(qvd_path: str):
     # register_duckdb_filtered
     idx = qvd.ExistsIndex.from_values(["1", "3", "5"])
     qvd.register_duckdb_filtered(conn, "sales_subset", qvd_path, "id", idx)
-    cnt = conn.sql("SELECT COUNT(*) FROM sales_subset").fetchone()[0]
+    cnt = conn.sql("SELECT COUNT(*) FROM sales_subset").fetchall()[0][0]
     assert_eq("register_duckdb_filtered row count", cnt, 3)
 
     # register_duckdb_folder

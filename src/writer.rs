@@ -49,9 +49,9 @@ pub fn write_qvd_generated<W: Write>(table: &QvdTable, mut writer: W) -> QvdResu
         let raw_indices: Vec<u64> = header
             .fields
             .iter()
-            .enumerate()
-            .map(|(col_idx, field)| {
-                let signed_idx = table.row_indices[col_idx][row_idx];
+            .zip(&table.row_indices[..header.fields.len()])
+            .map(|(field, indices)| {
+                let signed_idx = indices[row_idx];
                 (signed_idx - field.bias as i64) as u64
             })
             .collect();

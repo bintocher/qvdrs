@@ -227,8 +227,7 @@ impl QvdTable {
             .collect();
 
         let mut matching_rows = Vec::new();
-        for row in 0..self.num_rows() {
-            let sym_idx = self.row_indices[col_idx][row];
+        for (row, &sym_idx) in self.row_indices[col_idx][..self.num_rows()].iter().enumerate() {
             if sym_idx >= 0 {
                 let sym_idx = sym_idx as usize;
                 if sym_idx < symbol_matches.len() && symbol_matches[sym_idx] {
