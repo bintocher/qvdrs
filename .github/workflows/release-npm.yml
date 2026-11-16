@@ -72,7 +72,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+
+      - name: Check stored registry identity
+        shell: pwsh
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          try {
+            $identity = Invoke-RestMethod https://registry.npmjs.org/-/whoami -Headers @{Authorization="Bearer $env:NPM_TOKEN"}
+            Write-Output "Stored token account: $($identity.username)"
+          } catch {
+            Write-Output "Stored token authentication status: $([int]$_.Exception.Response.StatusCode)"
+          }
 
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
@@ -107,8 +118,6 @@ jobs:
 
       - name: Publish platform packages to npm
         shell: pwsh
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           foreach ($directory in Get-ChildItem npm -Directory) {
             Push-Location $directory.FullName
@@ -120,5 +129,3 @@ jobs:
 
       - name: Publish main package
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
