@@ -1,6 +1,6 @@
 {
   "name": "qvdrs",
-  "version": "0.8.0",
+  "version": "0.7.2",
   "description": "High-performance Qlik QVD file reader/writer — Rust-powered Node.js bindings",
   "main": "index.js",
   "types": "index.d.ts",
@@ -43,11 +43,11 @@
     "node": ">= 22"
   },
   "optionalDependencies": {
-    "qvdrs-win32-x64-msvc": "0.7.1",
-    "qvdrs-linux-x64-gnu": "0.7.1",
-    "qvdrs-linux-arm64-gnu": "0.7.1",
-    "qvdrs-darwin-x64": "0.7.1",
-    "qvdrs-darwin-arm64": "0.7.1"
+    "qvdrs-win32-x64-msvc": "0.7.2",
+    "qvdrs-linux-x64-gnu": "0.7.2",
+    "qvdrs-linux-arm64-gnu": "0.7.2",
+    "qvdrs-darwin-x64": "0.7.2",
+    "qvdrs-darwin-arm64": "0.7.2"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.0.0",

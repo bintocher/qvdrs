@@ -1,10 +1,16 @@
 {
   "name": "qvdrs-win32-x64-msvc",
-  "version": "0.7.1",
-  "os": ["win32"],
-  "cpu": ["x64"],
+  "version": "0.7.2",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "main": "qvdrs.win32-x64-msvc.node",
-  "files": ["qvdrs.win32-x64-msvc.node"],
+  "files": [
+    "qvdrs.win32-x64-msvc.node"
+  ],
   "description": "Windows x64 native binary for qvdrs",
   "license": "MIT",
   "engines": {

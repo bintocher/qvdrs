@@ -86,36 +86,35 @@ jobs:
           path: artifacts
 
       - name: Move artifacts to platform packages
+        shell: pwsh
         run: |
-          declare -A TARGET_MAP=(
-            ["x86_64-pc-windows-msvc"]="win32-x64-msvc"
-            ["x86_64-unknown-linux-gnu"]="linux-x64-gnu"
-            ["aarch64-unknown-linux-gnu"]="linux-arm64-gnu"
-            ["x86_64-apple-darwin"]="darwin-x64"
-            ["aarch64-apple-darwin"]="darwin-arm64"
-          )
-          for dir in artifacts/bindings-*/; do
-            target=$(basename "$dir" | sed 's/bindings-//')
-            npm_dir=${TARGET_MAP[$target]}
-            if [ -n "$npm_dir" ]; then
-              for f in "$dir"*.node; do
-                dest_name="qvdrs.${npm_dir}.node"
-                cp "$f" "npm/${npm_dir}/${dest_name}"
-                echo "Copied $f -> npm/${npm_dir}/${dest_name}"
-              done
-            fi
-          done
-          ls -la npm/*/*.node
+          $targets = @{
+            'x86_64-pc-windows-msvc' = 'win32-x64-msvc'
+            'x86_64-unknown-linux-gnu' = 'linux-x64-gnu'
+            'aarch64-unknown-linux-gnu' = 'linux-arm64-gnu'
+            'x86_64-apple-darwin' = 'darwin-x64'
+            'aarch64-apple-darwin' = 'darwin-arm64'
+          }
+          foreach ($target in $targets.Keys) {
+            $files = @(Get-ChildItem "artifacts/bindings-$target/*.node")
+            if ($files.Count -ne 1) { throw "Expected one binding for $target" }
+            $platform = $targets[$target]
+            Copy-Item -LiteralPath $files[0].FullName -Destination "npm/$platform/qvdrs.$platform.node"
+          }
+
+      - name: Test native package
+        run: node -e "const q=require('./npm/linux-x64-gnu'); const i=q.JsExistsIndex.fromValues(['a','b']); if(i.len!==2 || !i.exists('a') || i.exists('c')) throw Error('Native package failed');"
 
       - name: Publish platform packages to npm
+        shell: pwsh
         run: |
-          for dir in npm/*/; do
-            if [ -f "$dir/package.json" ] && ls "$dir"*.node 1>/dev/null 2>&1; then
-              cd "$dir"
-              npm publish --provenance --access public || true
-              cd ../..
-            fi
-          done
+          foreach ($directory in Get-ChildItem npm -Directory) {
+            Push-Location $directory.FullName
+            try {
+              npm publish --provenance --access public
+              if ($LASTEXITCODE -ne 0) { throw "Publish failed: $($directory.Name)" }
+            } finally { Pop-Location }
+          }
 
       - name: Publish main package
         run: npm publish --provenance --access public

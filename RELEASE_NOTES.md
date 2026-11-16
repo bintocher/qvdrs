@@ -2,6 +2,15 @@
 
 ---
 
+## v0.7.2
+
+- Rust: `read_qvd_header`, `read_qvd_header_file` and `read_qvd_symbols_file` read metadata or one field's dictionary without loading records.
+- Python: `read_qvd_header(path, max_header_bytes=16777216)` returns metadata with a bounded header read; `read_qvd_symbols(path, field)` reads one dictionary.
+- Python: `open_qvd_chunks` provides a streaming reader and avoids cloning symbol tables for each chunk.
+- Added regression tests for header-only reads, missing binary data and dictionaries without row indices.
+
+---
+
 ## v0.7.1
 
 ### Bug Fixes

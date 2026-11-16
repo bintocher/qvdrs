@@ -1,10 +1,16 @@
 {
   "name": "qvdrs-linux-arm64-gnu",
-  "version": "0.7.1",
-  "os": ["linux"],
-  "cpu": ["arm64"],
+  "version": "0.7.2",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "main": "qvdrs.linux-arm64-gnu.node",
-  "files": ["qvdrs.linux-arm64-gnu.node"],
+  "files": [
+    "qvdrs.linux-arm64-gnu.node"
+  ],
   "description": "Linux arm64 native binary for qvdrs",
   "license": "MIT",
   "engines": {

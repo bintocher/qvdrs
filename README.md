@@ -29,7 +29,7 @@ High-performance Rust library for reading, writing, converting and merging Qlik 
 
 ```toml
 # Cargo.toml
-qvd = "0.7.1"
+qvd = "0.7.2"
 ```
 ```rust
 let table = qvd::read_qvd_file("data.qvd")?;
