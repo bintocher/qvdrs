@@ -17,13 +17,13 @@ High-performance Rust library for reading, writing, converting and merging Qlik 
 - **Read/Write** QVD with byte-identical roundtrip (tested on 399 files up to 2.8 GB)
 - **Streaming** chunk-based reader for large files
 - **EXISTS()** O(1) index + filtered reads (2.5x faster than Qlik Sense)
-- **Concatenate** — pure append with strict/union schema modes
-- **PK Merge** — upsert/dedup by primary key (replace/skip/error). First QVD library with this
-- **Parquet/Arrow** — bidirectional conversion, `write_arrow()` for direct Arrow-to-QVD
-- **DuckDB / DataFusion** — register QVD as SQL tables
-- **Python** — PyArrow, pandas, Polars via zero-copy Arrow bridge
-- **Node.js / TypeScript** — native bindings via napi-rs, async I/O
-- **CLI** — inspect, convert, filter, head
+- **Concatenate** - pure append with strict/union schema modes
+- **PK Merge** - upsert/dedup by primary key (replace/skip/error). First QVD library with this
+- **Parquet/Arrow** - bidirectional conversion, `write_arrow()` for direct Arrow-to-QVD
+- **DuckDB / DataFusion** - register QVD as SQL tables
+- **Python** - PyArrow, pandas, Polars via zero-copy Arrow bridge
+- **Node.js / TypeScript** - native bindings via napi-rs, async I/O
+- **CLI** - inspect, convert, filter, head
 
 ## Quick Start
 
@@ -67,7 +67,8 @@ await saveQvd(table, 'copy.qvd')
 | [TypeScript Examples](docs/typescript_examples.md) | Read/write, EXISTS, concat, PK merge, async patterns |
 | [API Reference](docs/api_reference.md) | Full API tables for Rust, Python, and TypeScript |
 | [Release Notes](RELEASE_NOTES.md) | Changelog for all versions |
+| [npm Publishing](docs/npm-publishing.md) | Порядок выпуска, доступ GitHub Actions и первый выпуск Windows-пакета |
 
 ## License
 
-MIT — Stanislav Chernov ([@bintocher](https://github.com/bintocher))
+MIT - Stanislav Chernov ([@bintocher](https://github.com/bintocher))

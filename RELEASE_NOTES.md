@@ -4,6 +4,7 @@
 
 ## v0.7.2
 
+- npm: нативный модуль Windows x64 публикуется как `@bintocher/qvdrs-win32-x64-msvc`; основной пакет `qvdrs` выбирает его автоматически.
 - Rust: `read_qvd_header`, `read_qvd_header_file` and `read_qvd_symbols_file` read metadata or one field's dictionary without loading records.
 - Python: `read_qvd_header(path, max_header_bytes=16777216)` returns metadata with a bounded header read; `read_qvd_symbols(path, field)` reads one dictionary.
 - Python: `open_qvd_chunks` provides a streaming reader and avoids cloning symbol tables for each chunk.
@@ -16,7 +17,7 @@
 ### Bug Fixes
 
 - **Python: declare `pyarrow` as a runtime dependency** ([#2](https://github.com/bintocher/qvdrs/issues/2))
-  - `pip install qvdrs` now auto-installs `pyarrow` — previously users had to discover the requirement after hitting `ModuleNotFoundError: No module named 'pyarrow'` on calls like `register_duckdb()`, `read_qvd_to_arrow()`, `read_qvd_to_pandas()`, `read_qvd_to_polars()`, etc.
+  - `pip install qvdrs` now auto-installs `pyarrow` - previously users had to discover the requirement after hitting `ModuleNotFoundError: No module named 'pyarrow'` on calls like `register_duckdb()`, `read_qvd_to_arrow()`, `read_qvd_to_pandas()`, `read_qvd_to_polars()`, etc.
   - **Affected functions** (now work out of the box):
     - `register_duckdb`, `register_duckdb_filtered`, `register_duckdb_folder`
     - `read_qvd_to_arrow`, `read_qvd_to_pandas`, `read_qvd_to_polars`
@@ -35,7 +36,7 @@ pip install "qvdrs[all]"        # everything
 
 ### CI
 
-- Added end-to-end Python smoke test that installs the built wheel into a clean venv and calls `register_duckdb()` against a real QVD file — this regression class is now caught before publish.
+- Added end-to-end Python smoke test that installs the built wheel into a clean venv and calls `register_duckdb()` against a real QVD file - this regression class is now caught before publish.
 
 ### Migration
 
@@ -47,16 +48,16 @@ No breaking changes. Existing code continues to work without modification.
 
 ### New Features
 
-- **Node.js / TypeScript bindings** via napi-rs — native Rust performance in JavaScript. All I/O operations are async (run on libuv thread pool, never block the event loop). Sync variants available for scripts/CLI.
-  - `readQvd` / `readQvdSync` — read QVD files
-  - `saveQvd` / `saveQvdSync` — write QVD files
-  - `JsQvdTable` — full table API (get, filter, head, toJson, symbols, normalize)
-  - `JsExistsIndex` — O(1) EXISTS() lookups
-  - `readQvdFiltered` — streaming filtered reads
-  - `concatenateQvd` / `concatenatePkQvd` — file-level merge operations
+- **Node.js / TypeScript bindings** via napi-rs - native Rust performance in JavaScript. All I/O operations are async (run on libuv thread pool, never block the event loop). Sync variants available for scripts/CLI.
+  - `readQvd` / `readQvdSync` - read QVD files
+  - `saveQvd` / `saveQvdSync` - write QVD files
+  - `JsQvdTable` - full table API (get, filter, head, toJson, symbols, normalize)
+  - `JsExistsIndex` - O(1) EXISTS() lookups
+  - `readQvdFiltered` - streaming filtered reads
+  - `concatenateQvd` / `concatenatePkQvd` - file-level merge operations
   - Requires **Node.js 22+**
 
-- **npm publishing** — CI/CD workflow for automated npm releases. Platform-specific native binaries for Windows x64, Linux x64/arm64, macOS x64/arm64.
+- **npm publishing** - CI/CD workflow for automated npm releases. Platform-specific native binaries for Windows x64, Linux x64/arm64, macOS x64/arm64.
 
 ### Platforms
 
@@ -77,7 +78,7 @@ No breaking changes. All new features are purely additive.
 
 ## v0.6.2
 
-- Fix: abi3 minimum lowered from py312 to py39 — wheels now work on **Python 3.9+** (3.10, 3.11, 3.12, 3.13, 3.14)
+- Fix: abi3 minimum lowered from py312 to py39 - wheels now work on **Python 3.9+** (3.10, 3.11, 3.12, 3.13, 3.14)
 - v0.6.1 fixed CI to build abi3 wheels but still required Python >= 3.12; this release fixes that
 
 ## v0.6.1
@@ -89,13 +90,13 @@ No breaking changes. All new features are purely additive.
 
 ### New Features
 
-- **`write_arrow`** — write PyArrow RecordBatch or Table directly to QVD in a single call. No Parquet roundtrip needed when working with DuckDB, Arrow, or any PyArrow-compatible source. Handles `combine_chunks` internally for multi-chunk Tables.
+- **`write_arrow`** - write PyArrow RecordBatch or Table directly to QVD in a single call. No Parquet roundtrip needed when working with DuckDB, Arrow, or any PyArrow-compatible source. Handles `combine_chunks` internally for multi-chunk Tables.
 
-- **`concatenate` (pure append)** — merge two QVD tables with Qlik CONCATENATE semantics. Columns are matched by name. Available as a Rust function, Python method (`QvdTable.concatenate()`), and top-level Python function (`qvd.concatenate_qvd()`).
+- **`concatenate` (pure append)** - merge two QVD tables with Qlik CONCATENATE semantics. Columns are matched by name. Available as a Rust function, Python method (`QvdTable.concatenate()`), and top-level Python function (`qvd.concatenate_qvd()`).
 
-- **`concatenate_with_pk` (PK-based upsert/dedup)** — merge with primary key deduplication. **First QVD library in any language with PK-based merge.** Supports composite keys, three conflict strategies (`replace` / `skip` / `error`), and matches Qlik `CONCATENATE + WHERE NOT EXISTS(pk)` semantics.
+- **`concatenate_with_pk` (PK-based upsert/dedup)** - merge with primary key deduplication. **First QVD library in any language with PK-based merge.** Supports composite keys, three conflict strategies (`replace` / `skip` / `error`), and matches Qlik `CONCATENATE + WHERE NOT EXISTS(pk)` semantics.
 
-- **`SchemaMode`** — schema validation for concatenation: `strict` (default, error on column mismatch) or `union` (fill missing columns with NULL).
+- **`SchemaMode`** - schema validation for concatenation: `strict` (default, error on column mismatch) or `union` (fill missing columns with NULL).
 
 - **Python bindings** for all new functions: `write_arrow`, `concatenate`, `concatenate_pk`, `concatenate_qvd`, `concatenate_pk_qvd`.
 
@@ -111,20 +112,20 @@ No breaking changes. All new features are purely additive.
 
 ## v0.5.0
 
-- **Qlik Sense-compatible QVD output** — binary-identical to Qlik. Generated QVD files are now byte-for-byte identical to files produced by Qlik Sense, ensuring full compatibility.
+- **Qlik Sense-compatible QVD output** - binary-identical to Qlik. Generated QVD files are now byte-for-byte identical to files produced by Qlik Sense, ensuring full compatibility.
 
 ---
 
 ## v0.4.4
 
-- **Native DuckDB integration** — register QVD files as SQL-queryable DuckDB tables with `register_duckdb()`. One call to register, then query with standard SQL.
+- **Native DuckDB integration** - register QVD files as SQL-queryable DuckDB tables with `register_duckdb()`. One call to register, then query with standard SQL.
 
 ---
 
 ## v0.4.3
 
-- **DuckDB native integration extensions** — added `register_duckdb_folder()` to bulk-register entire directories of QVD files as DuckDB tables. Supports recursive scanning, glob patterns, and file size limits.
-- **Python bindings for streaming EXISTS filter** — `read_qvd_filtered()` and `register_duckdb_filtered()` now available from Python. Stream-reads only matching rows for large files.
+- **DuckDB native integration extensions** - added `register_duckdb_folder()` to bulk-register entire directories of QVD files as DuckDB tables. Supports recursive scanning, glob patterns, and file size limits.
+- **Python bindings for streaming EXISTS filter** - `read_qvd_filtered()` and `register_duckdb_filtered()` now available from Python. Stream-reads only matching rows for large files.
 
 ---
 
@@ -145,21 +146,21 @@ No breaking changes. All new features are purely additive.
 
 ## v0.4.0
 
-- **Streaming EXISTS() filter** — 2.5x faster than Qlik Sense for filtered reads. `ExistsIndex` provides O(1) hash-based lookups matching Qlik's `EXISTS()` function.
+- **Streaming EXISTS() filter** - 2.5x faster than Qlik Sense for filtered reads. `ExistsIndex` provides O(1) hash-based lookups matching Qlik's `EXISTS()` function.
 - Column selection support in streaming reads.
 
 ---
 
 ## v0.3.0
 
-- **Fix Qlik Sense incompatibility** — generated QVD files are now readable by Qlik Sense. Fixed critical bug where XML parser picked field-level Offset instead of table-level Offset.
+- **Fix Qlik Sense incompatibility** - generated QVD files are now readable by Qlik Sense. Fixed critical bug where XML parser picked field-level Offset instead of table-level Offset.
 
 ---
 
 ## v0.2.0
 
 - **DataFusion SQL engine integration** for server-side SQL queries on QVD data.
-- **PyArrow / pandas / Polars conversion** — `to_arrow()`, `to_pandas()`, `to_polars()`, `from_arrow()`.
+- **PyArrow / pandas / Polars conversion** - `to_arrow()`, `to_pandas()`, `to_polars()`, `from_arrow()`.
 - **DuckDB integration** via Arrow bridge.
 
 ---
@@ -172,6 +173,6 @@ No breaking changes. All new features are purely additive.
 
 ## v0.1.0
 
-- **Initial release** — QVD file reader/writer library.
+- **Initial release** - QVD file reader/writer library.
 - Parquet/Arrow conversion, streaming reader, CLI tool.
 - CI/CD pipeline for PyPI and crates.io publishing.

@@ -39,7 +39,7 @@ if (!nativeBinding) switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./qvdrs.win32-x64-msvc.node')
           } else {
-            nativeBinding = require('qvdrs-win32-x64-msvc')
+            nativeBinding = require('@bintocher/qvdrs-win32-x64-msvc')
           }
         } catch (e) {
           loadError = e

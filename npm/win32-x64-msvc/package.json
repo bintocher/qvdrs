@@ -1,5 +1,5 @@
 {
-  "name": "qvdrs-win32-x64-msvc",
+  "name": "@bintocher/qvdrs-win32-x64-msvc",
   "version": "0.7.2",
   "os": [
     "win32"

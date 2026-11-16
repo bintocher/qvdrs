@@ -73,18 +73,6 @@ jobs:
         with:
           node-version: 22
 
-      - name: Check stored registry identity
-        shell: pwsh
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          try {
-            $identity = Invoke-RestMethod https://registry.npmjs.org/-/whoami -Headers @{Authorization="Bearer $env:NPM_TOKEN"}
-            Write-Output "Stored token account: $($identity.username)"
-          } catch {
-            Write-Output "Stored token authentication status: $([int]$_.Exception.Response.StatusCode)"
-          }
-
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
 
@@ -116,16 +104,5 @@ jobs:
       - name: Test native package
         run: node -e "const q=require('./npm/linux-x64-gnu'); const i=q.JsExistsIndex.fromValues(['a','b']); if(i.len!==2 || !i.exists('a') || i.exists('c')) throw Error('Native package failed');"
 
-      - name: Publish platform packages to npm
-        shell: pwsh
-        run: |
-          foreach ($directory in Get-ChildItem npm -Directory) {
-            Push-Location $directory.FullName
-            try {
-              npm publish --provenance --access public
-              if ($LASTEXITCODE -ne 0) { throw "Publish failed: $($directory.Name)" }
-            } finally { Pop-Location }
-          }
-
-      - name: Publish main package
-        run: npm publish --provenance --access public
+      - name: Publish platform packages, then main package
+        run: node .github/scripts/publish-npm.cjs

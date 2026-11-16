@@ -43,7 +43,7 @@
     "node": ">= 22"
   },
   "optionalDependencies": {
-    "qvdrs-win32-x64-msvc": "0.7.2",
+    "@bintocher/qvdrs-win32-x64-msvc": "0.7.2",
     "qvdrs-linux-x64-gnu": "0.7.2",
     "qvdrs-linux-arm64-gnu": "0.7.2",
     "qvdrs-darwin-x64": "0.7.2",
