@@ -50,6 +50,26 @@ test('существующая версия с корректным репози
   assert.equal(calls.length, 1)
 })
 
+test('npm 12: точная существующая версия в массиве пропускается', () => {
+  const response = existing()
+  response.stdout = JSON.stringify([JSON.parse(response.stdout)])
+  let calls = 0
+  assert.equal(publishPackage(item, {
+    npm: () => { calls++; return response }, log: quiet,
+  }), 'existing')
+  assert.equal(calls, 1)
+})
+
+test('неоднозначный или пустой массив версий блокирует публикацию', () => {
+  const metadata = JSON.parse(existing().stdout)
+  for (const values of [[], [metadata, metadata]]) {
+    let calls = 0
+    const npm = () => { calls++; return { status: 0, stdout: JSON.stringify(values), stderr: '' } }
+    assert.throws(() => publishPackage(item, { npm, log: quiet }), /не прошел проверку/)
+    assert.equal(calls, 1)
+  }
+})
+
 test('чужой репозиторий существующей версии блокирует публикацию', () => {
   let calls = 0
   const npm = () => { calls++; return existing({ repository: { url: 'https://github.com/another/qvdrs' } }) }

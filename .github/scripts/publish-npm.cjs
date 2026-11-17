@@ -91,7 +91,9 @@ function publishPackage(item, { npm = runNpm, log = console.log } = {}) {
   if (view.error || view.status === null || !Number.isInteger(view.status)) {
     throw new Error(`Не удалось выполнить npm view для ${spec}`)
   }
-  const metadata = parseJson(view.stdout)
+  const response = parseJson(view.stdout)
+  // npm 11 возвращает объект, npm 12 - массив даже для одной точной версии.
+  const metadata = Array.isArray(response) && response.length === 1 ? response[0] : response
   if (view.status === 0) {
     if (!metadata || Array.isArray(metadata) || metadata.name !== manifest.name ||
         metadata.version !== manifest.version || !isExpectedRepository(metadata.repository) ||
